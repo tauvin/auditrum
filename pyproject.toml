@@ -1,0 +1,59 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "auditrum"
+version = "0.2.0"
+description = "Auditrum — a PostgreSQL audit system with rich contextual logging and Django integration"
+readme = "README.md"
+authors = [
+    {name = "Andrei Karbanovich", email = "andrey.karbanovich@icloud.com"}
+]
+license = {text = "MIT"}
+requires-python = ">=3.8"
+
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Framework :: Django",
+    "Topic :: Database",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+]
+
+keywords = ["postgresql", "audit", "django", "database", "triggers", "history", "track changes"]
+
+# Core dependencies (for CLI and audit logic)
+dependencies = [
+    "typer>=0.9",
+    "psycopg[binary]>=3.1",
+    "pydantic>=2.5",
+    "structlog>=23.0",
+    "dateutils>=0.6.12",
+    "dotenv>=0.9.9",
+]
+
+[project.optional-dependencies]
+django = ["Django>=4.2"]
+
+[project.urls]
+Homepage = "https://github.com/tauvin/auditrum"
+BugTracker = "https://github.com/tauvin/auditrum/issues"
+Documentation = "https://auditrum.readthedocs.io/"
+
+[project.scripts]
+auditrum = "auditrum.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["auditrum*"]
+
+[tool.setuptools.package-data]
+auditrum = ["**/*.html", "**/*.txt"]

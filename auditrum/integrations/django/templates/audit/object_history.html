@@ -1,0 +1,58 @@
+
+
+{% extends "admin/base_site.html" %}
+{% load i18n static %}
+
+{% block content %}
+<div class="app-auditlog module">
+    <h1>{{ title }}</h1>
+
+    {% if is_paginated %}
+    <div class="paginator">
+        {% if page_obj.has_previous %}
+            <a href="?page={{ page_obj.previous_page_number }}">&laquo; Previous</a>
+        {% endif %}
+        <span class="current">
+            Page {{ page_obj.number }} of {{ page_obj.paginator.num_pages }}
+        </span>
+        {% if page_obj.has_next %}
+            <a href="?page={{ page_obj.next_page_number }}">Next &raquo;</a>
+        {% endif %}
+    </div>
+    {% endif %}
+
+    <table class="admin-auditlog-table" style="width: 100%; border-collapse: collapse;">
+        <thead>
+            <tr>
+                <th>Changed At</th>
+                <th>Operation</th>
+                <th>User</th>
+                <th>Source</th>
+                <th>Reason</th>
+                <th>Diff</th>
+            </tr>
+        </thead>
+        <tbody>
+        {% for log in audit_logs %}
+            <tr>
+                <td>{{ log.changed_at }}</td>
+                <td>{{ log.operation }}</td>
+                <td>{{ log.user_id }}</td>
+                <td>{{ log.source }}</td>
+                <td>{{ log.change_reason|default:"–" }}</td>
+                <td>
+                    <details>
+                        <summary>View</summary>
+                        <pre style="white-space: pre-wrap;">{{ log.diff|default:"–" }}</pre>
+                    </details>
+                </td>
+            </tr>
+        {% empty %}
+            <tr>
+                <td colspan="6">No audit records found.</td>
+            </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endblock %}
