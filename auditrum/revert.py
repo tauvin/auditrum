@@ -4,6 +4,13 @@ from auditrum.tracking.spec import validate_identifier
 
 
 def get_revert_columns_from_log(conn, audit_table: str, log_id: int) -> list[str]:
+    """Return the column names that should be restored when reverting a log entry.
+
+    Skips ``id`` because the primary key is invariant — the revert is
+    keyed *by* it, restoring it would be a no-op at best and a type
+    mismatch at worst (jsonb ``->>`` always returns ``text``, but most
+    primary keys are ``integer`` or ``bigint``).
+    """
     validate_identifier(audit_table, "audit_table")
     query = sql.SQL("SELECT jsonb_object_keys(old_data) FROM {} WHERE id = %s").format(
         sql.Identifier(audit_table)
@@ -11,7 +18,7 @@ def get_revert_columns_from_log(conn, audit_table: str, log_id: int) -> list[str
     with conn.cursor() as cur:
         cur.execute(query, (int(log_id),))
         keys = cur.fetchall()
-    return [row[0] for row in keys]
+    return [row[0] for row in keys if row[0] != "id"]
 
 
 def generate_revert_sql(

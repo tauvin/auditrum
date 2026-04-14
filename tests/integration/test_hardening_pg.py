@@ -49,6 +49,7 @@ def limited_role(audit_setup):
     The role needs:
     - SELECT/INSERT/UPDATE/DELETE on widgets (the tracked table)
     - SELECT/USAGE on the sequence (so it can INSERT)
+    - SELECT on auditlog (so the in-app history view still works)
     - NO direct write access on auditlog / audit_context (those come via
       the SECURITY DEFINER trigger functions only)
     """
@@ -62,6 +63,9 @@ def limited_role(audit_setup):
         cur.execute(
             "GRANT USAGE, SELECT ON SEQUENCE widgets_id_seq TO app_test_user"
         )
+        # Grant SELECT explicitly so we can verify hardening preserves it
+        cur.execute("GRANT SELECT ON auditlog TO app_test_user")
+        cur.execute("GRANT SELECT ON audit_context TO app_test_user")
         # Apply the hardening — REVOKE writes on auditlog + audit_context
         cur.execute(generate_revoke_sql("auditlog", app_role="app_test_user"))
 

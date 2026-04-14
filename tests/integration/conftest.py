@@ -57,10 +57,20 @@ def pg_conn(pg_dsn):
 
 @pytest.fixture
 def fresh_auditlog(pg_conn):
-    """Create a clean auditlog + audit_context schema per test."""
+    """Create a clean auditlog + audit_context schema + helper functions per test.
+
+    Mirrors what the Django ``0001_initial`` migration installs in a real
+    project: the audit log table, the context table, ``jsonb_diff``, the
+    two PL/pgSQL helper functions that the audit trigger calls
+    (``_audit_attach_context`` and ``_audit_current_user_id``), the
+    reconstruct functions used by time-travel queries, and one month of
+    rolling partitions.
+    """
     from auditrum.schema import (
         generate_audit_attach_context_sql,
         generate_audit_context_table_sql,
+        generate_audit_current_user_id_sql,
+        generate_audit_reconstruct_sql,
         generate_auditlog_partitions_sql,
         generate_auditlog_table_sql,
         generate_jsonb_diff_function_sql,
@@ -71,13 +81,33 @@ def fresh_auditlog(pg_conn):
         cur.execute("DROP TABLE IF EXISTS audit_context CASCADE")
         cur.execute("DROP FUNCTION IF EXISTS jsonb_diff(jsonb, jsonb) CASCADE")
         cur.execute("DROP FUNCTION IF EXISTS _audit_attach_context() CASCADE")
+        cur.execute("DROP FUNCTION IF EXISTS _audit_current_user_id() CASCADE")
+        cur.execute(
+            "DROP FUNCTION IF EXISTS "
+            "_audit_reconstruct_row(text, text, timestamptz) CASCADE"
+        )
+        cur.execute(
+            "DROP FUNCTION IF EXISTS "
+            "_audit_reconstruct_table(text, timestamptz) CASCADE"
+        )
         cur.execute(generate_audit_context_table_sql("audit_context"))
         cur.execute(generate_auditlog_table_sql("auditlog"))
         cur.execute(generate_jsonb_diff_function_sql())
         cur.execute(generate_audit_attach_context_sql("audit_context"))
+        cur.execute(generate_audit_current_user_id_sql())
+        cur.execute(generate_audit_reconstruct_sql("auditlog"))
         cur.execute(generate_auditlog_partitions_sql("auditlog", months_ahead=1))
     yield pg_conn
     with pg_conn.cursor() as cur:
         cur.execute("DROP FUNCTION IF EXISTS _audit_attach_context() CASCADE")
+        cur.execute("DROP FUNCTION IF EXISTS _audit_current_user_id() CASCADE")
+        cur.execute(
+            "DROP FUNCTION IF EXISTS "
+            "_audit_reconstruct_row(text, text, timestamptz) CASCADE"
+        )
+        cur.execute(
+            "DROP FUNCTION IF EXISTS "
+            "_audit_reconstruct_table(text, timestamptz) CASCADE"
+        )
         cur.execute("DROP TABLE IF EXISTS auditlog CASCADE")
         cur.execute("DROP TABLE IF EXISTS audit_context CASCADE")

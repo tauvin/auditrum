@@ -108,12 +108,46 @@ class TriggerManager:
         """Idempotently create the tracking table.
 
         Safe to call on every app startup — uses ``CREATE TABLE IF NOT
-        EXISTS``. Does not touch the audit log or context tables; those
-        come from ``auditrum.schema.generate_*_sql`` and are typically
-        applied via the host framework's migration system.
+        EXISTS`` and tolerates the catalog race that occurs when two
+        parallel bootstraps both pass the existence check before either
+        has committed. ``CREATE TABLE IF NOT EXISTS`` is **not** atomic
+        across concurrent sessions because the system catalog updates
+        only become visible after commit; under load the second call
+        can still hit ``pg_type_typname_nsp_index`` violations or
+        equivalent ``DuplicateTable`` errors. We catch those and verify
+        the table now exists — if it does, the race already resolved
+        in our favour and there is nothing else to do.
+
+        Does not touch the audit log or context tables; those come from
+        ``auditrum.schema.generate_*_sql`` and are typically applied via
+        the host framework's migration system.
         """
-        with self.executor.cursor() as cur:
-            cur.execute(_tracking_table_ddl(self.tracking_table))
+        try:
+            with self.executor.cursor() as cur:
+                cur.execute(_tracking_table_ddl(self.tracking_table))
+            return
+        except Exception as exc:
+            # Re-raise unless the failure looks like a concurrent-create
+            # collision. We avoid importing psycopg.errors at module
+            # level so the framework-agnostic core stays driver-free.
+            if not _looks_like_duplicate_table(exc):
+                raise
+
+        # A concurrent bootstrap may have just created the table.
+        # Verify it actually exists now; if so, swallow the original
+        # error. If not, re-raise so the caller sees the real problem.
+        try:
+            with self.executor.cursor() as cur:
+                cur.execute(
+                    "SELECT 1 FROM pg_catalog.pg_class WHERE relname = %s",
+                    (self.tracking_table,),
+                )
+                if cur.fetchone() is None:
+                    raise RuntimeError(
+                        f"bootstrap failed and {self.tracking_table} still missing"
+                    )
+        except Exception:
+            raise
 
     # ------------------------------------------------------------------
     # Inspection
@@ -174,17 +208,30 @@ class TriggerManager:
     # ------------------------------------------------------------------
 
     def _acquire_lock(self, cur, trigger_name: str) -> None:
-        """Advisory transaction lock keyed by trigger name.
+        """Acquire a session-level advisory lock keyed by trigger name.
 
-        Serializes concurrent installs of the same trigger so two racing
+        Serialises concurrent installs of the same trigger so two racing
         deploys don't leave the tracking table inconsistent with the
-        actual trigger state in ``pg_catalog``.
+        actual trigger state in ``pg_catalog``. We use a session lock
+        (``pg_advisory_lock``) rather than a transaction lock so the
+        protection holds even when the cursor's connection is in
+        autocommit mode — each ``cur.execute`` would otherwise commit
+        and release a transaction-scoped lock between statements.
+
+        Always pair with :meth:`_release_lock` in a ``try``/``finally``.
+
+        ``hashtextextended`` gives a 64-bit lock key so collisions with
+        other advisory-lock users in the same database are negligible.
         """
-        # 64-bit hash to keep the lock-key collision probability
-        # negligible across the whole DB. ``hashtext`` is only 32-bit
-        # and would alias with other advisory-lock users at scale.
         cur.execute(
-            "SELECT pg_advisory_xact_lock(hashtextextended(%s, 0))",
+            "SELECT pg_advisory_lock(hashtextextended(%s, 0))",
+            (trigger_name,),
+        )
+
+    def _release_lock(self, cur, trigger_name: str) -> None:
+        """Release the session-level advisory lock acquired by :meth:`_acquire_lock`."""
+        cur.execute(
+            "SELECT pg_advisory_unlock(hashtextextended(%s, 0))",
             (trigger_name,),
         )
 
@@ -222,14 +269,16 @@ class TriggerManager:
         bundle = spec.build()
         with self.executor.cursor() as cur:
             self._acquire_lock(cur, bundle.trigger_name)
+            try:
+                if not force:
+                    stored = self._fetch_stored(bundle.trigger_name)
+                    if stored is not None and stored[0] == bundle.checksum:
+                        return False
 
-            if not force:
-                stored = self._fetch_stored(bundle.trigger_name)
-                if stored is not None and stored[0] == bundle.checksum:
-                    return False
-
-            cur.execute(bundle.install_sql)
-            self._upsert_tracking(cur, bundle, spec.to_fingerprint())
+                cur.execute(bundle.install_sql)
+                self._upsert_tracking(cur, bundle, spec.to_fingerprint())
+            finally:
+                self._release_lock(cur, bundle.trigger_name)
         return True
 
     def uninstall(self, spec: TrackSpec) -> bool:
@@ -241,9 +290,12 @@ class TriggerManager:
         bundle = spec.build()
         with self.executor.cursor() as cur:
             self._acquire_lock(cur, bundle.trigger_name)
-            stored = self._fetch_stored(bundle.trigger_name)
-            cur.execute(bundle.uninstall_sql)
-            self._delete_tracking(cur, bundle.trigger_name)
+            try:
+                stored = self._fetch_stored(bundle.trigger_name)
+                cur.execute(bundle.uninstall_sql)
+                self._delete_tracking(cur, bundle.trigger_name)
+            finally:
+                self._release_lock(cur, bundle.trigger_name)
         return stored is not None
 
     def uninstall_by_name(self, trigger_name: str, table_name: str) -> bool:
@@ -267,8 +319,11 @@ class TriggerManager:
         )
         with self.executor.cursor() as cur:
             self._acquire_lock(cur, trigger_name)
-            cur.execute(uninstall_sql)
-            self._delete_tracking(cur, trigger_name)
+            try:
+                cur.execute(uninstall_sql)
+                self._delete_tracking(cur, trigger_name)
+            finally:
+                self._release_lock(cur, trigger_name)
         return True
 
     # ------------------------------------------------------------------
@@ -367,3 +422,25 @@ class TriggerManager:
                     report.uninstalled.append(name)
 
         return report
+
+
+# Postgres SQLSTATEs / message fragments for "this table is being created
+# right now by a concurrent transaction". Different drivers wrap them
+# differently — psycopg surfaces ``DuplicateTable`` (42P07) and
+# ``UniqueViolation`` (23505) on the implicit pg_type row. We match by
+# substring so the driver-agnostic core doesn't need a hard dependency.
+_DUPLICATE_TABLE_HINTS = (
+    "duplicatetable",
+    "duplicate table",
+    "already exists",
+    "pg_type_typname_nsp_index",
+    "pg_class_relname_nsp_index",
+    "duplicateobject",
+    "duplicate object",
+    "uniqueviolation",
+)
+
+
+def _looks_like_duplicate_table(exc: BaseException) -> bool:
+    text = (str(exc) + " " + type(exc).__name__).lower()
+    return any(hint in text for hint in _DUPLICATE_TABLE_HINTS)

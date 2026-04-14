@@ -62,7 +62,9 @@ class TestGenerateHashChainSql:
 
     def test_lookup_uses_chain_seq_ordering(self):
         sql = generate_hash_chain_sql("auditlog")
-        assert "ORDER BY chain_seq NULLS FIRST, id DESC" in sql
+        # Trigger looks up the *most recent* row to chain to, so DESC
+        # ordering with NULLS LAST (legacy rows fall through via id DESC).
+        assert "ORDER BY chain_seq DESC NULLS LAST, id DESC" in sql
 
     def test_advisory_lock_uses_64_bit_hashtext(self):
         sql = generate_hash_chain_sql("auditlog")

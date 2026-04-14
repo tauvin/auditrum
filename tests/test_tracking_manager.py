@@ -151,10 +151,17 @@ class TestInstall:
         new_statements = [s for s, _ in mgr.executor.state["executed"][before:after]]
         assert any("CREATE OR REPLACE FUNCTION" in s for s in new_statements)
 
-    def test_advisory_lock_acquired(self, mgr, spec):
+    def test_advisory_lock_acquired_and_released(self, mgr, spec):
+        """Session-level advisory lock taken before DDL and released after.
+
+        Was transaction-scoped (``pg_advisory_xact_lock``) until 0.3.1,
+        but that path silently does nothing with autocommit cursors
+        because each statement is its own implicit transaction.
+        """
         mgr.install(spec)
         statements = [sql for sql, _ in mgr.executor.state["executed"]]
-        assert any("pg_advisory_xact_lock(hashtext" in s for s in statements)
+        assert any("pg_advisory_lock(hashtextextended" in s for s in statements)
+        assert any("pg_advisory_unlock(hashtextextended" in s for s in statements)
 
 
 class TestUninstall:

@@ -133,6 +133,10 @@ BEGIN
     -- legacy rows that pre-date the chain_seq column (chain_seq IS NULL,
     -- ordered by id) so chain continuity is preserved across the
     -- migration boundary.
+    --
+    -- Ordering picks the *most recent* row to chain to:
+    -- chain_seq DESC (newest first) with NULLs sorted last, then id
+    -- DESC as the tiebreaker for legacy rows. LIMIT 1 takes the head.
     SELECT row_hash INTO last_hash
     FROM {table_name}
     WHERE row_hash IS NOT NULL
@@ -140,7 +144,7 @@ BEGIN
           (chain_seq IS NOT NULL AND chain_seq < NEW.chain_seq)
           OR chain_seq IS NULL
       )
-    ORDER BY chain_seq NULLS FIRST, id DESC
+    ORDER BY chain_seq DESC NULLS LAST, id DESC
     LIMIT 1;
 
     NEW.prev_hash := last_hash;

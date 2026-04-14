@@ -81,8 +81,15 @@ class TestManagerAgainstRealPostgres:
         assert user_id == 123
 
     def test_composite_index_covers_target_query(self, users_with_trigger):
-        """EXPLAIN should show the auditlog_target_idx index is used for
-        the (table_name, object_id, changed_at DESC) access pattern."""
+        """EXPLAIN should show that the (table_name, object_id, changed_at DESC)
+        access pattern uses an index, not a sequential scan.
+
+        Note: Postgres creates partition-local child indexes when you add an
+        index to a partitioned parent. The child indexes are auto-named
+        (``<parent>_<column>_idx<N>``) so we can't grep for ``auditlog_target_idx``
+        — we check that the planner produced an Index Cond with both
+        ``table_name`` and ``object_id`` instead.
+        """
         conn = users_with_trigger
         with conn.cursor() as cur:
             cur.execute("INSERT INTO app_users (name) VALUES ('idxtest')")
@@ -95,4 +102,8 @@ class TestManagerAgainstRealPostgres:
             )
             plan = "\n".join(row[0] for row in cur.fetchall())
             cur.execute("SET enable_seqscan = on")
-        assert "auditlog_target_idx" in plan
+        # An index scan happened (no Seq Scan), with the target index condition
+        assert "Index Cond" in plan
+        assert "table_name" in plan
+        assert "object_id" in plan
+        assert "Seq Scan" not in plan

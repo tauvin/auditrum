@@ -78,9 +78,14 @@ def generate_grant_admin_sql(
     retention jobs, while the regular app role can only append new
     entries through the trigger functions.
 
-    The granted privileges include ``INSERT`` so the admin role is the
-    owner of the trigger functions (which run ``SECURITY DEFINER``),
+    The granted privileges include ``INSERT`` so the admin role can be
+    the owner of the trigger functions (which run ``SECURITY DEFINER``),
     and ``UPDATE, DELETE, TRUNCATE`` for maintenance.
+
+    Also grants ``USAGE`` on ``<table>_id_seq`` so the admin role can
+    actually INSERT — direct INSERTs into ``auditlog`` consume the
+    serial-PK sequence, and Postgres requires ``USAGE`` on it
+    independently of the table-level grant.
     """
     validate_identifier(table_name, "table_name")
     validate_identifier(context_table, "context_table")
@@ -91,5 +96,6 @@ def generate_grant_admin_sql(
             f"ON {table_name} TO {admin_role};",
             f"GRANT SELECT, INSERT, UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER "
             f"ON {context_table} TO {admin_role};",
+            f"GRANT USAGE, SELECT ON SEQUENCE {table_name}_id_seq TO {admin_role};",
         ]
     )

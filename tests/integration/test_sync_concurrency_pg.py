@@ -74,12 +74,19 @@ def parallel_audit_setup(pg_dsn, pg_conn):
 
 
 def _sync_in_own_connection(dsn: str, spec: TrackSpec) -> dict:
-    """Helper that opens a fresh connection, runs sync, returns the report."""
-    with psycopg.connect(dsn, autocommit=False) as conn:
+    """Helper that opens a fresh connection, runs sync, returns the report.
+
+    Uses ``autocommit=True`` because sync issues DDL (CREATE TABLE,
+    CREATE FUNCTION, CREATE TRIGGER) which doesn't benefit from being
+    wrapped in an explicit transaction — and with autocommit each
+    statement is its own implicit transaction, so a CREATE TABLE
+    catalog race resolves cleanly without poisoning the connection's
+    transaction state.
+    """
+    with psycopg.connect(dsn, autocommit=True) as conn:
         mgr = TriggerManager(PsycopgExecutor(conn))
         mgr.bootstrap()
         report = mgr.sync([spec])
-        conn.commit()
         return {
             "installed": list(report.installed),
             "updated": list(report.updated),
