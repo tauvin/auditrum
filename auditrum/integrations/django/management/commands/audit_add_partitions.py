@@ -1,11 +1,10 @@
 
 
-import calendar
-from datetime import date
-from django.core.management.base import BaseCommand
-from django.conf import settings
-from auditrum.schema import generate_auditlog_partitions_sql
 import psycopg
+from django.conf import settings
+from django.core.management.base import BaseCommand
+
+from auditrum.schema import generate_auditlog_partitions_sql
 
 
 class Command(BaseCommand):

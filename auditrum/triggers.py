@@ -1,118 +1,152 @@
+"""Legacy trigger SQL generation facade.
+
+Historical users imported :func:`generate_trigger_sql` and
+:func:`build_trigger_spec` from this module. The canonical home for
+trigger generation is now :mod:`auditrum.tracking`, but these thin
+wrappers remain for backwards compatibility with existing code and the
+CLI / raw-SQL path.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+
+from auditrum.tracking.spec import (
+    FieldFilter,
+    TrackSpec,
+    _validate_ident,
+    validate_identifier,
+)
+
+__all__ = [
+    "TriggerSpec",
+    "build_trigger_spec",
+    "generate_trigger_sql",
+    "validate_identifier",
+    # Legacy alias, kept for callers that imported the underscore-prefixed
+    # name during 0.2 / 0.3 development.
+    "_validate_ident",
+]
+
+
+@dataclass(frozen=True)
+class TriggerSpec:
+    """Legacy rendered trigger view.
+
+    Preserved for callers that consumed the ``(declare, body, sql)`` shape
+    from the old :func:`build_trigger_spec` return value. New code should
+    use :class:`auditrum.tracking.TrackSpec` and its ``build()`` method.
+    """
+
+    table_name: str
+    audit_table: str
+    function_name: str
+    trigger_name: str
+    declare: tuple[tuple[str, str], ...]
+    body: str
+    sql: str
+
+
+def _to_track_spec(
+    table_name: str,
+    audit_table: str,
+    track_only: list[str] | None,
+    exclude_fields: list[str] | None,
+    log_conditions: str | None,
+    extra_meta_fields: list[str] | None,
+) -> TrackSpec:
+    if track_only is not None and exclude_fields is not None:
+        raise ValueError(
+            f"Cannot specify both track_only and exclude_fields for table {table_name}"
+        )
+    # Preserve historical error labels for the legacy facade. The tracking
+    # module uses terser labels internally; users of the raw ``generate_*``
+    # helpers see the original parameter names in the error.
+    validate_identifier(table_name, "table_name")
+    validate_identifier(audit_table, "audit_table")
+    if track_only is not None:
+        for f in track_only:
+            validate_identifier(f, "track_only field")
+        fields = FieldFilter.only(*track_only)
+    elif exclude_fields is not None:
+        for f in exclude_fields:
+            validate_identifier(f, "exclude_fields field")
+        fields = FieldFilter.exclude(*exclude_fields)
+    else:
+        fields = FieldFilter.all()
+    if extra_meta_fields:
+        for f in extra_meta_fields:
+            validate_identifier(f, "extra_meta_fields field")
+    return TrackSpec(
+        table=table_name,
+        audit_table=audit_table,
+        fields=fields,
+        log_condition=log_conditions,
+        extra_meta_fields=tuple(extra_meta_fields or ()),
+    )
+
+
+def build_trigger_spec(
+    table_name: str,
+    audit_table: str = "auditlog",
+    track_only: list[str] | None = None,
+    exclude_fields: list[str] | None = None,
+    log_conditions: str | None = None,
+    extra_meta_fields: list[str] | None = None,
+) -> TriggerSpec:
+    """Build a legacy :class:`TriggerSpec` (identifier-validated)."""
+    spec = _to_track_spec(
+        table_name,
+        audit_table,
+        track_only,
+        exclude_fields,
+        log_conditions,
+        extra_meta_fields,
+    )
+    bundle = spec.build()
+    # Legacy callers consumed ``declare`` as a tuple of ``(name, type)`` pairs;
+    # the template no longer exposes these as structured data, so we rebuild a
+    # minimal view here for callers that still want it.
+    declare: tuple[tuple[str, str], ...] = (
+        ("data", "JSONB"),
+        ("diff", "JSONB"),
+        ("ignored_keys", f"TEXT[] := {spec.fields.to_ignored_keys_expr()}"),
+        ("old_filtered", "jsonb := to_jsonb(OLD)"),
+        ("new_filtered", "jsonb := to_jsonb(NEW)"),
+        ("key", "text"),
+    )
+    return TriggerSpec(
+        table_name=spec.table,
+        audit_table=spec.audit_table,
+        function_name=bundle.function_name,
+        trigger_name=bundle.trigger_name,
+        declare=declare,
+        body="",  # body is no longer exposed as a separate string
+        sql=bundle.install_sql,
+    )
+
+
 def generate_trigger_sql(
     table_name: str,
     audit_table: str = "auditlog",
     track_only: list[str] | None = None,
     exclude_fields: list[str] | None = None,
     log_conditions: str | None = None,
-    meta_fields: list[str] | None = None,
+    extra_meta_fields: list[str] | None = None,
 ) -> str:
-    if track_only is not None and exclude_fields is not None:
-        raise ValueError(
-            f"Cannot specify both track_only and exclude_fields for table {table_name}"
-        )
+    """Render full ``CREATE FUNCTION`` + ``CREATE TRIGGER`` SQL for one table.
 
-    if track_only is not None:
-        track_only_keys = [f"'{k}'" for k in track_only]
-        keys_tuple = "(" + ", ".join(track_only_keys) + ")"
-        # We want to ignore keys NOT in track_only
-        ignored_keys_expr = f"ARRAY(SELECT key FROM jsonb_object_keys(to_jsonb(NEW)) AS key(key) WHERE key.key NOT IN {keys_tuple})::text[]"
-    elif exclude_fields is not None:
-        ignored_keys = [f"'{k}'" for k in exclude_fields]
-        ignored_keys_expr = f"ARRAY[{', '.join(ignored_keys)}]::text[]"
-    else:
-        ignored_keys_expr = "ARRAY[]::text[]"
-
-    default_meta_fields = [
-        "'username', current_setting('session.myapp_username', true)",
-        "'client_ip', current_setting('session.myapp_client_ip', true)",
-        "'user_agent', current_setting('session.myapp_user_agent', true)",
-        "'session_key', current_setting('session.myapp_session_key', true)",
-        "'source', current_setting('session.myapp_source', true)",
-        "'request_id', current_setting('session.myapp_request_id', true)",
-        "'change_reason', current_setting('session.myapp_change_reason', true)"
-    ]
-
-    if meta_fields:
-        extra_fields = [f"'{field}', to_jsonb(NEW.{field})" for field in meta_fields]
-        meta_fields_expr = ", ".join(default_meta_fields + extra_fields)
-    else:
-        meta_fields_expr = ", ".join(default_meta_fields)
-
-    log_conditions_expr = f"""
-    IF NOT ({log_conditions}) THEN
-        RETURN NULL;
-    END IF;
-""" if log_conditions else ""
-
-    function_name = f"audit_{table_name}_trigger"
-
-    sql = f"""
-CREATE OR REPLACE FUNCTION {function_name}() RETURNS trigger AS $$
-DECLARE
-    data JSONB;
-    diff JSONB;
-    ignored_keys TEXT[] := {ignored_keys_expr};
-    old_filtered jsonb := to_jsonb(OLD);
-    new_filtered jsonb := to_jsonb(NEW);
-    key text;
-BEGIN
-{log_conditions_expr}
-    FOREACH key IN ARRAY ignored_keys LOOP
-        old_filtered := old_filtered - key;
-        new_filtered := new_filtered - key;
-    END LOOP;
-    RAISE NOTICE 'IGNORED_KEYS: %', ignored_keys;
-    
-    IF (TG_OP = 'UPDATE') THEN
-        diff = jsonb_strip_nulls(jsonb_diff(old_filtered, new_filtered));
-        RAISE NOTICE 'Diff after filtering: %', diff;
-        RAISE NOTICE 'Diff is null?: %',  diff is null;
-        IF diff is null THEN
-            RETURN NULL;
-        END IF;
-    ELSIF TG_OP = 'INSERT' THEN
-        diff = new_filtered;
-        IF diff is null THEN
-            RETURN NULL;
-        END IF;
-    ELSIF TG_OP = 'DELETE' THEN
-        diff = old_filtered;
-        IF diff is null THEN
-            RETURN NULL;
-        END IF;
-    END IF;
-
-    IF (TG_OP = 'DELETE') THEN
-        data = to_jsonb(OLD);
-    ELSE
-        data = to_jsonb(NEW);
-    END IF;
-
-    INSERT INTO {audit_table} (
-        operation, changed_at, content_type_id, object_id, table_name,
-        user_id, old_data, new_data, diff, meta, request_id, change_reason, source
+    Thin wrapper around :meth:`TrackSpec.build`. Identifiers are validated
+    via :func:`_validate_ident` (reused from :mod:`auditrum.tracking.spec`)
+    so SQL injection through user-supplied names is blocked at construction
+    time. ``log_conditions`` is trusted PL/pgSQL — never pass user input.
+    """
+    spec = _to_track_spec(
+        table_name,
+        audit_table,
+        track_only,
+        exclude_fields,
+        log_conditions,
+        extra_meta_fields,
     )
-    VALUES (
-        TG_OP, now(), NULL, NULL, TG_TABLE_NAME,
-        NULL, 
-        CASE WHEN TG_OP IN ('UPDATE', 'DELETE') THEN to_jsonb(OLD) ELSE NULL END,
-        CASE WHEN TG_OP IN ('UPDATE', 'INSERT') THEN to_jsonb(NEW) ELSE NULL END,
-        CASE WHEN TG_OP = 'UPDATE' THEN diff ELSE NULL END,
-        jsonb_build_object({meta_fields_expr}),
-        current_setting('session.myapp_request_id', true),
-        current_setting('session.myapp_change_reason', true),
-        current_setting('session.myapp_source', true)
-    );
-
-    RETURN NULL;
-END;
-$$ LANGUAGE plpgsql;
-
-DROP TRIGGER IF EXISTS {function_name} ON {table_name};
-
-CREATE TRIGGER {function_name}
-AFTER INSERT OR UPDATE OR DELETE ON {table_name}
-FOR EACH ROW EXECUTE FUNCTION {function_name}();
-"""
-    print(f"Generated trigger SQL for table '{table_name}':\n{sql}")
-    return sql.strip()
+    return spec.build().install_sql

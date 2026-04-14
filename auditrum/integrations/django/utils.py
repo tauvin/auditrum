@@ -1,12 +1,22 @@
-from contextlib import contextmanager
-
 from django.contrib.admin.templatetags.admin_urls import admin_urlname
-from django.db import models, connection
+from django.db import models
 from django.shortcuts import resolve_url
+from django.utils import timezone
 from django.utils.formats import date_format
 from django.utils.html import format_html
 from django.utils.safestring import mark_safe
-from django.utils import timezone
+
+from auditrum.utils import audit_tracked  # re-exported for backwards compatibility
+
+__all__ = [
+    "audit_tracked",
+    "link",
+    "link_to_related_object",
+    "resolve_field_value",
+    "get_user_display",
+    "render_log_changes",
+    "set_var",
+]
 
 
 def link(href: str, text: str) -> str:
@@ -114,59 +124,6 @@ def render_log_changes(log):
     return mark_safe("<em class='text-gray-500'>No changes</em>")
 
 
-def get_changed_object(log):
-    if log.content_object:
-        original_model_name = log.content_object.__class__.__name__
-        if hasattr(log.content_object, "auction") and original_model_name.lower() in ("lot", "bid", "invoice", "sale"):
-            auction = log.content_object.auction
-            if not isinstance(auction, str):
-                auction = auction.id
-
-            model_name = f"{auction.capitalize()}{original_model_name}"
-            proxy_model = apps.get_model(auction, model_name)
-            instance = proxy_model.objects.get(id=log.object_id)
-        else:
-            instance = log.content_object
-
-        try:
-            return link_to_related_object(instance, str(log.content_object))
-        except Exception:
-            return str(log.content_object)
-    return "-"
-
-
-def set_var(cursor, key, value):
+def set_var(cursor, key: str, value) -> None:
     if value is not None:
         cursor.execute(f"SET {key} = %s", [str(value)])
-
-
-# def set_audit_context():
-#     cursor = connection.cursor()
-#     ctx = get_audit_context_data()
-#     reason = get_change_reason()
-#     if reason:
-#         ctx["change_reason"] = reason
-#     for key, value in ctx.items():
-#         set_var(cursor, f"session.myapp_{key}", value)
-
-
-@contextmanager
-def audit_tracked(**kwargs):
-    """
-    A context manager to set session-local audit context for manual or automated actions.
-    Useful for management commands, cron jobs, etc.
-
-    Example:
-        with audit_tracked(change_reason="Sync job", source="cron"):
-            ...
-    """
-    from auditrum.context import audit_context
-
-    with audit_context.use(**kwargs), audit_context.use_change_reason(kwargs.get("change_reason", "system action")):
-        from django.db import connection
-        sql = audit_context.build_sql()
-        with connection.cursor() as cursor:
-            for stmt in sql.strip().split(";"):
-                if stmt.strip():
-                    cursor.execute(stmt)
-        yield

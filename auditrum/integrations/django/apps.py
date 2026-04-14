@@ -1,5 +1,9 @@
-from django.apps import AppConfig
-from django.db.models.signals import post_migrate
+from importlib import import_module
+
+from django.apps import AppConfig, apps
+
+from auditrum.context import audit_context
+from auditrum.integrations.django.executor import DjangoExecutor
 
 
 class PgAuditIntegrationConfig(AppConfig):
@@ -9,13 +13,10 @@ class PgAuditIntegrationConfig(AppConfig):
     verbose_name = "PostgreSQL Audit (auditrum)"
 
     def ready(self):
-        from .hooks import register_post_migrate_hook
-        from django.apps import apps
-        from importlib import import_module
+        audit_context.set_executor(DjangoExecutor())
 
-        post_migrate.connect(register_post_migrate_hook, sender=self)
-
-        # Automatically discover and import audit.py from all installed apps
+        # Auto-discover per-app audit.py modules so their register() calls
+        # attach pgtrigger Triggers to the target models before migrations run.
         for app_config in apps.get_app_configs():
             try:
                 import_module(f"{app_config.name}.audit")

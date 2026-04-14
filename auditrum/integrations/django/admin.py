@@ -1,7 +1,20 @@
 from django.contrib import admin
 from django.utils.html import format_html
 
-from auditrum.integrations.django.models import AuditLog
+from auditrum.integrations.django.models import AuditContext, AuditLog
+
+
+@admin.register(AuditContext)
+class AuditContextAdmin(admin.ModelAdmin):
+    list_display = ("id", "created_at", "updated_at", "event_count")
+    readonly_fields = ("id", "metadata", "created_at", "updated_at")
+    ordering = ("-created_at",)
+    search_fields = ("id",)
+
+    def event_count(self, obj):
+        return obj.events.count()
+
+    event_count.short_description = "Events"
 
 
 @admin.register(AuditLog)
@@ -12,23 +25,27 @@ class AuditLogAdmin(admin.ModelAdmin):
         "table_name",
         "object_id",
         "user_id",
-        "source",
-        "request_id",
+        "context_id",
         "linked_object",
     )
-    list_filter = ("operation", "table_name", "source")
-    search_fields = ("object_id", "request_id", "change_reason")
+    list_filter = ("operation", "table_name")
+    search_fields = ("object_id", "context_id")
     readonly_fields = [f.name for f in AuditLog._meta.fields]
     ordering = ("-changed_at",)
 
     def linked_object(self, obj):
-        if obj.content_object:
-            return format_html(
-                '<a href="{}">{}</a>',
-                obj.content_object.get_absolute_url(),
-                obj.content_object,
-            )
-        return "-"
+        try:
+            target = obj.content_object
+        except Exception:
+            return "-"
+        if target is None:
+            return "-"
+        get_url = getattr(target, "get_absolute_url", None)
+        if callable(get_url):
+            try:
+                return format_html('<a href="{}">{}</a>', get_url(), str(target))
+            except Exception:
+                return str(target)
+        return str(target)
 
-    linked_object.allow_tags = True
     linked_object.short_description = "Linked Object"

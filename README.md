@@ -115,7 +115,7 @@ To track changes made via `manage.py` commands (e.g. `migrate`, `shell`) with pr
 ```python
 # manage.py
 
-from auditrum.utils import audit_tracked
+from auditrum import audit_tracked  # noqa (re-export from auditrum.utils)
 
 
 def main():
@@ -218,9 +218,74 @@ with audit_context.use_change_reason("Bulk update for compliance"):
 
 ---
 
+## 🛡️ Hardening Guide
+
+For compliance-sensitive deployments, the audit log should be append-only and
+tamper-detectable. `auditrum` ships three building blocks that can be enabled
+independently:
+
+### 1. Revoke mutating privileges (append-only)
+
+```bash
+auditrum harden --app-role myapp --admin-role myapp_admin
+```
+
+This runs `REVOKE UPDATE, DELETE, TRUNCATE ON auditlog FROM PUBLIC, myapp` and
+grants full privileges to a dedicated `myapp_admin` role. After this step the
+regular application role can only append audit rows; maintenance (partition
+drops, retention) must run as `myapp_admin`.
+
+### 2. Retention / purge
+
+Delete rows older than a cutoff or drop entire month partitions:
+
+```bash
+# DELETE-based (fine for smaller tables)
+auditrum purge --older-than '2 years'
+
+# Partition-based (fast, WAL-friendly)
+auditrum purge --older-than '2 years' --drop-partitions
+```
+
+### 3. Tamper detection via SHA-256 hash chain
+
+Enable optional row hashing + a chain of `prev_hash` pointers:
+
+```bash
+auditrum enable-hash-chain
+```
+
+`BEFORE INSERT` triggers on the audit log compute a SHA-256 of
+`(id, changed_at, operation, table_name, old_data, new_data, prev_hash)` using
+`pgcrypto`. Writes are serialized via `pg_advisory_xact_lock`, so peak insert
+throughput drops — pair this with careful benchmarking if your workload is
+high-write. To check integrity:
+
+```bash
+auditrum verify-chain
+```
+
+This runs a server-side recomputation across the whole log and reports any
+rows whose stored `row_hash` or `prev_hash` disagrees with the expected value.
+
+---
+
 ## 📖 Documentation
 
-👉 Full docs at: [https://auditrum.readthedocs.io/](https://auditrum.readthedocs.io/)
+Full documentation lives under [`docs/`](docs/README.md) and renders
+directly on GitHub. Start with:
+
+- [Getting started](docs/getting-started.md) — install and first audit event
+- [Core concepts](docs/concepts.md) — `TrackSpec`, `TriggerManager`, context flow
+- [Django integration](docs/django.md) / [SQLAlchemy integration](docs/sqlalchemy.md)
+- [Time travel](docs/time-travel.md) — reconstruct rows at any past timestamp
+- [`auditrum blame`](docs/blame.md) — git-style per-row history from the CLI
+- [Hardening and compliance](docs/hardening.md) — hash chain, retention, append-only
+- [Observability](docs/observability.md) — OpenTelemetry, Prometheus, Sentry
+- [CLI reference](docs/cli.md) — every subcommand, every option
+- [Architecture](docs/architecture.md) — schema, indexes, trigger flow, concurrency
+
+Changelog: [CHANGELOG.md](CHANGELOG.md)
 
 ---
 
