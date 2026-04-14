@@ -110,16 +110,22 @@ jobs:
       # Confirm the .sql templates actually made it into the wheel.
       # If they didn't, the package installs but trigger generation
       # crashes with FileNotFoundError on first use.
+      #
+      # ``python -m zipfile -l`` output is ``<path> <date> <size>`` per
+      # line, so ``$``-anchored regexes don't work — the line ends with
+      # the byte count, not the filename. Match ``.sql`` followed by
+      # whitespace (the column separator) instead.
       - name: Verify SQL templates are bundled
         run: |
           set -euo pipefail
           WHEEL=$(ls dist/*.whl)
           printf 'Inspecting %s\n' "$WHEEL"
-          if ! python -m zipfile -l "$WHEEL" | grep -q '\.sql$'; then
+          SQL_FILES=$(python -m zipfile -l "$WHEEL" | awk '/\.sql[[:space:]]/')
+          if [ -z "$SQL_FILES" ]; then
             echo "::error::No .sql templates found in built wheel"
             exit 1
           fi
-          python -m zipfile -l "$WHEEL" | grep '\.sql$'
+          printf '%s\n' "$SQL_FILES"
 
       - name: Publish to PyPI
         env:
