@@ -10,6 +10,242 @@ the API stabilises.
 
 Nothing yet. Open an issue or PR if there's something you'd like to see.
 
+## [0.3.1] — 2026-04-14
+
+A security and correctness follow-up to 0.3.0. After tagging 0.3.0 the
+codebase went through a three-pass independent review (senior dev,
+security auditor, QA) which surfaced 21 findings — 5 critical, 6 high,
+10 medium. **All 21 are fixed in this release.** No new public APIs
+were broken; the upgrade is drop-in for projects already on 0.3.0.
+
+### Security
+
+#### Hardening model — `auditrum harden` is now actually append-only
+
+In 0.3.0 the `auditrum harden` command revoked `UPDATE` / `DELETE` /
+`TRUNCATE` from `PUBLIC` but **left `INSERT` intact**, on the
+assumption that audit triggers needed it to write rows. They didn't —
+because the trigger functions were `SECURITY INVOKER` (the default),
+they actually ran with the calling role's privileges and would have
+broken the moment INSERT was revoked. The result was a marketing claim
+("application can only append truthfully") that the code didn't deliver:
+a compromised app role could write its own forged audit rows directly
+via `INSERT INTO auditlog (...) VALUES ('FAKE_USER', ...)`.
+
+- **`SECURITY DEFINER` audit trigger functions.** Every audit trigger
+  function — and the helpers `_audit_attach_context`,
+  `_audit_current_user_id`, `_audit_reconstruct_row`,
+  `_audit_reconstruct_table`, and the `<table>_hash_chain_trigger`
+  function — now declare `SECURITY DEFINER` with
+  `SET search_path = pg_catalog, public`. They run with the
+  privileges of their owner (the migration role), not the caller.
+- **`auditrum harden` now revokes `INSERT` too**, on both `auditlog`
+  and `audit_context`. The new `--context-table` flag covers custom
+  context table names. `generate_grant_admin_sql` grants the admin
+  role full privileges on both tables.
+- **Two-role deployment model documented in `docs/hardening.md`**:
+  separate `myapp_admin` (migrations, retention, function owner) and
+  `myapp_runtime` (app traffic, SELECT-only on the audit tables,
+  INSERT only via triggers). Includes a snippet for transferring
+  function ownership after the fact via `ALTER FUNCTION ... OWNER`.
+- **Append-only verification in integration tests**. New tests in
+  `tests/integration/test_hardening_pg.py` create a limited Postgres
+  role, apply the hardening, and prove that
+  `INSERT INTO auditlog` / `INSERT INTO audit_context` /
+  `UPDATE auditlog` / `DELETE FROM auditlog` all raise
+  `InsufficientPrivilege` from the app role, while
+  `INSERT INTO widgets` still produces an audit row through the
+  trigger path. Smoke tests for the admin role round-trip too.
+
+#### Hash chain integrity
+
+- **Canonical JSON encoding for the hash payload.** The 0.3.0 chain
+  hashed `field1 || '|' || field2 || ...` text concatenation, which
+  allowed trivial collision attacks: a forged row whose `operation`
+  field contained `|` could replicate a legitimate row's hash. The
+  new payload is `jsonb_build_object('id', NEW.id, 'changed_at',
+  NEW.changed_at, ...)::text` — JSON object structure is an
+  unforgeable delimiter. Trigger and `verify_chain` share a single
+  `_CANONICAL_PAYLOAD_EXPR` constant so they cannot drift.
+- **Tail-row deletion detection via tip anchors.** New
+  `auditrum.hash_chain.get_chain_tip(conn)` returns the current
+  `(id, chain_seq, row_hash, changed_at)` of the most recent chained
+  row. `verify_chain(conn, expected_tip=...)` accepts that anchor
+  back, verifies the tip row is still present and unmodified, and
+  reports `tip row missing`, `tip row_hash mismatch`, or
+  `tip id missing` when an attacker truncates the tail. Without an
+  anchor the LAG-based check is blind to deletion of the most recent
+  rows. Document recommends storing the anchor periodically in a
+  tamper-evident external store (S3 with Object Lock, separate WORM
+  database, paper printout for the truly paranoid).
+- **`chain_seq bigint` column + dedicated sequence assigned inside
+  the advisory lock.** The 0.3.0 chain used `id` for ordering, but
+  Postgres assigns serial defaults *before* BEFORE INSERT triggers
+  fire — concurrent transactions could grab `id=10` and `id=11` in
+  reverse commit order, producing a chain whose `prev_hash` pointers
+  didn't form a contiguous line. `chain_seq` is now allocated from
+  a dedicated sequence **after** the trigger takes the per-table
+  advisory lock, guaranteeing strict monotonicity in lock-acquisition
+  order. Verify orders by `chain_seq NULLS FIRST, id` so legacy
+  rows from before this change still chain correctly.
+- **Advisory lock now uses `hashtextextended('table', 0)`** (64-bit)
+  instead of `hashtext('table')` (32-bit). Eliminates the chance of
+  advisory-lock-key collisions with other lock users sharing the
+  database.
+
+#### Context propagation safety
+
+- **`_Context` is now genuinely immutable.** The 0.3.0 implementation
+  was a `namedtuple` whose `metadata` slot held a plain `dict` that
+  nested `__init__` would mutate in place. Two async tasks sharing
+  the same outermost context could lose-write each other's metadata.
+  The dataclass is now `frozen=True` with `metadata` wrapped in
+  `types.MappingProxyType`, and nested entries push a fresh
+  `_Context` onto the `ContextVar` (with the outer id preserved and
+  metadata merged copy-on-push) instead of mutating. Outer state is
+  restored verbatim on inner `__exit__` — inner metadata cannot leak
+  into the outer block.
+- **GUC names are now bound parameters in the runtime injection.**
+  The `_inject_audit_context` execute_wrapper used to f-string
+  interpolate `audit_settings.guc_id` / `audit_settings.guc_metadata`
+  into the prefix SQL. Both are now passed as bound parameters and
+  the `AuditSettings` properties validate them against
+  `^[a-z_][a-z0-9_]*\.[a-z_][a-z0-9_]*$` (the Postgres custom GUC
+  name format). Defence in depth even though the trust boundary is
+  Django settings.
+- **Legacy `AuditContext.use()` switched to `is_local=true`.** The
+  cursor-based legacy path used `set_config(..., false)` (session
+  scope), which leaked across requests on pooled connections
+  (pgbouncer, Django `CONN_MAX_AGE > 0`). It now uses
+  transaction-local semantics with a clear docstring warning that
+  `audit_tracked` requires being inside `transaction.atomic()` for
+  correct behaviour. HTTP traffic should use the
+  execute_wrapper-based `auditrum_context` instead.
+- **Session token PII protection.** `AuditrumMiddleware` no longer
+  stores the raw `session_key` (a live bearer token) in the audit
+  context. By default it stores
+  `hmac.sha256(SECRET_KEY, session_key)[:16]` — short enough to be a
+  useful correlation id, long enough to be collision-resistant per
+  deployment, and one-way so a leaked audit log doesn't compromise
+  active sessions. Controlled by `PGAUDIT_HASH_SESSION_KEY` (default
+  `True`). A companion `PGAUDIT_REDACT_USER_AGENT` setting drops
+  the user-agent header for strict GDPR setups.
+
+#### CTE statement handling
+
+- **`WITH` added to `IGNORED_SQL_PREFIXES`.** The execute_wrapper
+  prefixes `SELECT set_config(...);` to every injectable statement.
+  Django emits `WITH ...` for some `QuerySet.annotate()` chains; the
+  resulting `SELECT set_config(...); WITH ...` was invalid SQL.
+  CTE statements now bypass injection entirely.
+
+#### Migration operation correctness
+
+- **`InstallTrigger` operation now uses `DjangoExecutor` with the
+  schema editor's connection.** The 0.3.0 path wrapped
+  `schema_editor.connection` (a Django `DatabaseWrapper`) in
+  `PsycopgExecutor` (which expects a raw psycopg connection). Worked
+  by accident on `psycopg` 3 for the default alias but was
+  undocumented and fragile on multi-DB setups. `DjangoExecutor` now
+  optionally accepts a `connection=` argument and goes through
+  Django's cursor protocol explicitly. Tests cover both the default
+  (lazy global connection) and explicit-connection modes.
+
+#### Generator output validation
+
+- **`auditrum_makemigrations` output is now verified to be loadable**
+  by a new `TestAuditrumMakemigrationsLoadability` class. The 0.3.0
+  tests only `--dry-run`'d and substring-matched the output. The new
+  tests write the file to a tmp app dir, parse it with `compile()`,
+  and re-import it via `importlib` to confirm
+  `Migration.operations[0]` is a real `InstallTrigger` instance with
+  the right `TrackSpec`. Round-trip test for `log_condition` with
+  single quotes — caught no bugs but closes the door on future
+  string-concat regressions.
+
+#### Defence in depth
+
+- **`uninstall_by_name` re-validates identifiers** even when reading
+  trigger/table names from the tracking table. If an attacker can
+  write to `auditrum_applied_triggers`, they should not also get
+  DDL execution via a maintenance call.
+- **Blame markup escape.** `auditrum blame` (rich mode) now escapes
+  `[` characters in user-controlled metadata fields (`username`,
+  `change_reason`, `source`) to prevent terminal markup injection
+  via attacker-controlled strings like `[red]VICTIM[/red]`.
+- **Concurrency tests for `TriggerManager.sync()`**. New
+  `tests/integration/test_sync_concurrency_pg.py` runs N parallel
+  syncs against the same spec via `ThreadPoolExecutor` against a
+  shared testcontainer, asserts the tracking table converges to
+  exactly one row, and verifies the trigger function is actually
+  installed in `pg_proc`. Confirms the per-trigger advisory lock
+  story under load.
+
+### Added
+
+- **`auditrum.hash_chain.get_chain_tip(conn)`** — capture the current
+  chain tip as `(id, chain_seq, row_hash, changed_at)` for external
+  anchoring against tail-row deletion.
+- **`verify_chain(conn, expected_tip=...)`** — verify the chain
+  against a previously captured tip anchor, detecting truncation that
+  the LAG-based check is blind to.
+- **`auditrum.tracking.spec.validate_identifier`** — public name for
+  the previously-private `_validate_ident`. The underscore-prefixed
+  alias remains for backwards compatibility.
+- **`reconstruct_table(conn, ..., stream=True)`** — server-side
+  named-cursor streaming for whole-table time-travel queries on
+  large logs. The default `stream=False` keeps the previous
+  ``fetchall()`` behaviour for small tables.
+- **Django settings**: `PGAUDIT_HASH_SESSION_KEY` (default `True`),
+  `PGAUDIT_REDACT_USER_AGENT` (default `False`), `PGAUDIT_GUC_ID`
+  and `PGAUDIT_GUC_METADATA` (now validated against the Postgres
+  custom GUC name format).
+- **`DjangoExecutor(connection=...)`** — optional explicit
+  connection argument for use inside migration operations.
+
+### Changed
+
+- **Retention intervals are now calendar-aware.** `_parse_interval`
+  returns a `dateutil.relativedelta` instead of `timedelta`. `1 year`
+  now means one calendar year (handles leap years correctly), and
+  `6 months` means six calendar months (e.g. April 14 → October 14)
+  rather than 180 days. This matters for GDPR retention deadlines
+  that map to calendar boundaries.
+- **`auditrum status` CLI command** now matches triggers via the
+  `audit_<table>_trigger` name pattern instead of the legacy
+  `audit_trigger_fn` action_statement substring (which was renamed
+  in 0.3 and silently reported zero triggers in the meantime).
+- **`specs_by_app_label` is now O(M+N) instead of O(M×N)** and
+  emits a `logging.warning` when a registered spec references a
+  `db_table` that no longer matches any installed model (e.g. the
+  user renamed the model after `@track`-ing it). Previously the
+  spec was silently dropped from the migration output.
+- **`TriggerManager.__init__`** moved its `validate_identifier`
+  import to module level — minor consistency cleanup.
+
+### Fixed
+
+- All findings from the pre-release review (5 critical / 6 high /
+  10 medium). The full breakdown is above.
+
+### Migration from 0.3.0
+
+Most users do not need to do anything beyond `pip install
+auditrum==0.3.1`. Two exceptions:
+
+1. **Existing hash-chained logs** get a new `chain_seq` column and
+   sequence the next time you run a migration that reaches
+   `generate_hash_chain_sql`. Existing rows have `chain_seq = NULL`
+   and continue to verify via the legacy id-ordering fallback. New
+   rows get monotonic `chain_seq` and the chain is correct under
+   concurrency from that point forward.
+2. **If you ran `auditrum harden` against 0.3.0** and rely on the
+   "append-only" guarantee, re-run it after upgrading. The 0.3.0
+   command left `INSERT` intact; the 0.3.1 command also revokes
+   `INSERT` and covers `audit_context`. You should also transfer
+   trigger function ownership to a dedicated admin role — see the
+   snippet in `docs/hardening.md`.
+
 ## [0.3.0] — 2026-04-14
 
 This is a big one. Most of the internals have been rewritten — the audit
@@ -256,159 +492,16 @@ extras". If you were on 0.2.0, expect a migration step (see
 
 ### Security
 
-This release went through a three-pass independent review (senior dev,
-security auditor, QA) before tagging. Every finding tagged CRITICAL or
-HIGH was fixed; the rest are tracked for 0.3.1 / 0.4 in the project
-issue tracker.
-
-#### Hardening model
-
-- **`SECURITY DEFINER` audit trigger functions.** Every audit trigger
-  function — and the helper functions `_audit_attach_context`,
-  `_audit_current_user_id`, `_audit_reconstruct_row`,
-  `_audit_reconstruct_table` — now declare `SECURITY DEFINER` with
-  `SET search_path = pg_catalog, public`. They run with the
-  privileges of their owner (the migration role), not the calling
-  app role. This is the prerequisite that lets the application role
-  have direct `INSERT` on `auditlog` revoked entirely.
-- **`auditrum harden` now revokes `INSERT` too**, and covers both
-  `auditlog` and `audit_context`. In 0.2 the command only revoked
-  `UPDATE` / `DELETE` / `TRUNCATE`, which left a forgery hole — a
-  compromised app role could write its own audit rows directly.
-  Together with the SECURITY DEFINER functions this closes the
-  forgery path completely.
-- **Two-role deployment model documented in `docs/hardening.md`**:
-  separate `myapp_admin` (migrations, retention, function owner) and
-  `myapp_runtime` (app traffic, SELECT-only on the audit tables,
-  INSERT only via triggers). Includes a snippet for transferring
-  function ownership after the fact.
-- **Append-only verification in integration tests**. New tests in
-  `tests/integration/test_hardening_pg.py` actually create a limited
-  Postgres role, apply the hardening, and prove that
-  `INSERT INTO auditlog` / `INSERT INTO audit_context` /
-  `UPDATE auditlog` / `DELETE FROM auditlog` all raise
-  `InsufficientPrivilege` from the app role, while
-  `INSERT INTO widgets` still produces an audit row through the
-  trigger path. Smoke tests for the admin role round-trip too.
-
-#### Hash chain integrity
-
-- **Canonical JSON encoding for the hash payload.** The chain now
-  hashes `jsonb_build_object('id', NEW.id, 'changed_at',
-  NEW.changed_at, …)::text` instead of the old `field1 || '|' ||
-  field2 || …` concatenation. The naive separator-join allowed
-  trivial collision attacks where a forged row whose `operation`
-  field contained `|` could replicate a legitimate row's hash.
-  The new encoding uses the JSON object structure as an
-  unforgeable delimiter and is shared between the trigger and the
-  server-side `verify_chain` query via a single
-  `_CANONICAL_PAYLOAD_EXPR` constant.
-- **Tail-row deletion detection via tip anchors.** A new
-  `auditrum.hash_chain.get_chain_tip(conn)` function returns the
-  current `(id, row_hash)` of the most recent row in the chain.
-  `verify_chain(conn, expected_tip=...)` then accepts that anchor
-  back, verifies the tip row is still present and unmodified, and
-  reports `tip row missing`, `tip row_hash mismatch`, or
-  `tip id missing` when an attacker truncates the tail. Without an
-  anchor the LAG-based check is blind to deletion of the most recent
-  rows. Document recommends storing the anchor periodically in a
-  tamper-evident external store (S3 with Object Lock, separate WORM
-  database, paper printout for the truly paranoid).
-- **`SECURITY DEFINER`** on the chain trigger function too, matching
-  the audit trigger model.
-
-#### Context propagation safety
-
-- **`_Context` is now genuinely immutable.** The previous
-  implementation was a `namedtuple` whose `metadata` slot held a
-  plain `dict` that nested `__init__` would mutate in place. Two
-  async tasks sharing the same outermost context could lose-write
-  each other's metadata. The dataclass is now `frozen=True` with
-  `metadata` wrapped in `types.MappingProxyType`, and nested entries
-  push a fresh `_Context` onto the `ContextVar` (with the outer id
-  preserved and metadata merged copy-on-push) instead of mutating.
-  Outer state is restored verbatim on inner `__exit__` — inner
-  metadata cannot leak into the outer block.
-- **GUC names are now bound parameters in the runtime injection.**
-  The `_inject_audit_context` execute_wrapper used to f-string
-  interpolate `audit_settings.guc_id` / `audit_settings.guc_metadata`
-  into the prefix SQL. Both are now passed as bound parameters and
-  the `AuditSettings` properties validate them against
-  `^[a-z_][a-z0-9_]*\.[a-z_][a-z0-9_]*$` (the Postgres custom GUC
-  name format). Defence in depth even though the trust boundary is
-  Django settings.
-- **Legacy `AuditContext.use()` switched to `is_local=true`.** The
-  cursor-based legacy path used `set_config(..., false)` (session
-  scope), which leaked across requests on pooled connections
-  (pgbouncer, Django `CONN_MAX_AGE > 0`). It now uses
-  transaction-local semantics with a clear docstring warning that
-  `audit_tracked` requires being inside `transaction.atomic()` for
-  correct behaviour. HTTP traffic should use the
-  execute_wrapper-based `auditrum_context` instead.
-- **Session token PII protection.** `AuditrumMiddleware` no longer
-  stores the raw `session_key` (a live bearer token) in the audit
-  context. By default it stores
-  `hmac.sha256(SECRET_KEY, session_key)[:16]` — short enough to be a
-  useful correlation id, long enough to be collision-resistant per
-  deployment, and one-way so a leaked audit log doesn't compromise
-  active sessions. Controlled by `PGAUDIT_HASH_SESSION_KEY` (default
-  `True`). A companion `PGAUDIT_REDACT_USER_AGENT` setting drops
-  the user-agent header for strict GDPR setups.
-
-#### CTE statement handling
-
-- **`WITH` added to `IGNORED_SQL_PREFIXES`.** The execute_wrapper
-  prefixes `SELECT set_config(...);` to every injectable statement.
-  Django emits `WITH ...` for some `QuerySet.annotate()` chains; the
-  resulting `SELECT set_config(...); WITH ...` was invalid SQL.
-  CTE statements now bypass injection entirely.
-
-#### Migration operation correctness
-
-- **`InstallTrigger` operation now uses `DjangoExecutor` with the
-  schema editor's connection.** The 0.3.0 alpha briefly wrapped
-  `schema_editor.connection` (a Django `DatabaseWrapper`) in
-  `PsycopgExecutor` (which expects a raw psycopg connection). Worked
-  by accident on `psycopg` 3 for the default alias but was
-  undocumented and fragile on multi-DB setups. `DjangoExecutor` now
-  optionally accepts a `connection=` argument and goes through
-  Django's cursor protocol explicitly. Tests cover both the default
-  (lazy global connection) and explicit-connection modes.
-
-#### Generator output validation
-
-- **`auditrum_makemigrations` output is now verified to be
-  loadable** by a new `TestAuditrumMakemigrationsLoadability` class.
-  The previous tests only `--dry-run`'d and substring-matched the
-  output. The new tests write the file to a tmp app dir, parse it
-  with `compile()`, and re-import it via `importlib` to confirm
-  `Migration.operations[0]` is a real `InstallTrigger` instance
-  with the right `TrackSpec`. Includes a round-trip test for
-  `log_condition` containing single quotes — caught no bugs but
-  closes the door on future string-concat regressions.
-
-#### Other security touches
-
-- **Identifier validation tested at every public entry point.**
-  Every `generate_*_sql` function, `TrackSpec`, `FieldFilter`,
-  `fetch_blame`, `reconstruct_*`, and `verify_chain` now has a
-  parameterised "rejects injection" test. The validation regex was
-  always there; the test coverage closes the chance of a future
-  refactor accidentally bypassing it.
-- **Concurrency tests for `TriggerManager.sync()`**. New
-  `tests/integration/test_sync_concurrency_pg.py` runs N parallel
-  syncs against the same spec via `ThreadPoolExecutor` against a
-  shared testcontainer, asserts the tracking table converges to
-  exactly one row, and verifies the trigger function is actually
-  installed in `pg_proc`. Confirms the per-trigger advisory lock
-  story under load.
-
-#### Compliance-grade story
-
-Hash chain, REVOKE-on-audit, retention tooling, and tamper
-detection together give the project a credible compliance-grade
-story. See [`docs/hardening.md`](docs/hardening.md) for the
-deployment guide and the role split.
+- Initial hardening tooling: `auditrum harden` (REVOKE
+  `UPDATE`/`DELETE`/`TRUNCATE` on the audit log), `enable-hash-chain`
+  (SHA-256 row chain via `pgcrypto`), `verify-chain` for server-side
+  chain verification. **Note:** the 0.3.0 implementation left
+  `INSERT` intact and used `SECURITY INVOKER` trigger functions —
+  see [0.3.1] for the full append-only model and a collision-resistant
+  payload encoding. If you're shipping audit data anywhere it matters,
+  upgrade to 0.3.1.
+- Retention helpers (`auditrum purge`, partition drop) and a hardening
+  guide at `docs/hardening.md`.
 
 ### Breaking changes
 
@@ -442,6 +535,7 @@ Initial public release. Adds the Django integration, the Typer-based
 CLI, and the first cut of trigger-based audit logging on partitioned
 PostgreSQL tables.
 
-[Unreleased]: https://github.com/tauvin/auditrum/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/tauvin/auditrum/compare/v0.3.1...HEAD
+[0.3.1]: https://github.com/tauvin/auditrum/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/tauvin/auditrum/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/tauvin/auditrum/releases/tag/v0.2.0

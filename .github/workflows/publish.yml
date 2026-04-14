@@ -1,37 +1,196 @@
 name: Publish to PyPI
 
+# Triggered only by version tags like ``v0.3.0``. Push a tag and the
+# workflow runs the test suite, builds the package, publishes to PyPI,
+# and creates a GitHub release with the relevant CHANGELOG section.
+#
+# The previous version triggered on ``push: branches: main`` which meant
+# every commit attempted an upload — PyPI then rejected the duplicates,
+# silently failing most runs. The tag-based trigger is explicit: you
+# release something only when you decide to, by tagging.
 on:
   push:
-    branches:
-      - main
+    tags:
+      - "v*"
 
 permissions:
-  contents: read
+  contents: write   # needed for creating GitHub releases
+  id-token: write   # reserved for future migration to PyPI Trusted Publishing
 
 jobs:
-  publish:
-    name: Build and publish to PyPI
+  # ---------------------------------------------------------------------
+  # Step 1: run the test suite + lint. Fails the whole pipeline if red.
+  # ---------------------------------------------------------------------
+  test:
+    name: Run unit tests
     runs-on: ubuntu-latest
-
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Set up Python
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          version: latest
+
+      - name: Set up Python 3.13
+        run: uv python install 3.13
+
+      - name: Install all extras
+        run: |
+          uv sync \
+            --extra django \
+            --extra sqlalchemy \
+            --extra observability \
+            --extra test
+
+      - name: Run unit tests
+        run: uv run pytest tests/ -q --no-header
+
+      - name: Lint
+        run: uv run ruff check .
+
+  # ---------------------------------------------------------------------
+  # Step 2: build wheels + sdist, validate version, publish to PyPI.
+  # ---------------------------------------------------------------------
+  publish:
+    name: Build and publish to PyPI
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
-      - name: Install dependencies
+      # Guard against tagging a release where pyproject.toml hasn't been
+      # bumped. Catches the "I tagged v0.4.0 but forgot to update version
+      # = 0.3.0" footgun before any artifacts get built.
+      #
+      # ``GITHUB_REF`` is read as a runtime shell variable (not a workflow
+      # ``${{ ... }}`` substitution) so even a maliciously-crafted tag
+      # name cannot inject shell — bash parameter expansion does not
+      # re-evaluate variable contents as code.
+      - name: Verify tag matches pyproject.toml version
+        run: |
+          set -euo pipefail
+          TAG_VERSION="${GITHUB_REF#refs/tags/v}"
+          PKG_VERSION=$(python -c "
+          import tomllib, pathlib
+          data = tomllib.loads(pathlib.Path('pyproject.toml').read_bytes())
+          print(data['project']['version'])
+          ")
+          printf 'tag:        %s\n' "$TAG_VERSION"
+          printf 'pyproject:  %s\n' "$PKG_VERSION"
+          if [ "$TAG_VERSION" != "$PKG_VERSION" ]; then
+            echo "::error::Tag version does not match pyproject.toml version. Bump and retag."
+            exit 1
+          fi
+
+      - name: Install build tooling
         run: |
           python -m pip install --upgrade pip
           pip install build twine
 
-      - name: Build package
+      - name: Build sdist + wheel
         run: python -m build
+
+      # Catches markdown rendering bugs in README before they end up
+      # on the public PyPI page where they're harder to fix.
+      - name: Validate built artifacts
+        run: python -m twine check dist/*
+
+      # Confirm the .sql templates actually made it into the wheel.
+      # If they didn't, the package installs but trigger generation
+      # crashes with FileNotFoundError on first use.
+      - name: Verify SQL templates are bundled
+        run: |
+          set -euo pipefail
+          WHEEL=$(ls dist/*.whl)
+          printf 'Inspecting %s\n' "$WHEEL"
+          if ! python -m zipfile -l "$WHEEL" | grep -q '\.sql$'; then
+            echo "::error::No .sql templates found in built wheel"
+            exit 1
+          fi
+          python -m zipfile -l "$WHEEL" | grep '\.sql$'
 
       - name: Publish to PyPI
         env:
           TWINE_USERNAME: __token__
           TWINE_PASSWORD: ${{ secrets.PYPI }}
         run: twine upload dist/*
+
+      # Hand the artifacts to the release job so it can attach them to
+      # the GitHub release.
+      - name: Upload artifacts for release job
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+          retention-days: 7
+
+  # ---------------------------------------------------------------------
+  # Step 3: cut a GitHub release with the CHANGELOG section as body and
+  # the built artifacts attached.
+  # ---------------------------------------------------------------------
+  release:
+    name: Create GitHub release
+    needs: publish
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download built artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+      # Extract the CHANGELOG section for this exact version. Falls back
+      # to a generic blurb if no matching section is found, so the workflow
+      # never fails just because someone forgot to write a section.
+      #
+      # ``VERSION`` and ``REPO`` are passed in via env: rather than via
+      # ``${{ ... }}`` substitution so the shell never sees the raw
+      # workflow expression — defence in depth even though both are
+      # already set by GitHub itself.
+      - name: Extract changelog section
+        env:
+          REF_NAME: ${{ github.ref_name }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          VERSION="${REF_NAME#v}"
+          printf 'Looking for ## [%s] in CHANGELOG.md\n' "$VERSION"
+
+          awk -v ver="$VERSION" '
+            /^## \[/ {
+              if (found) exit
+              if ($0 ~ "\\[" ver "\\]") { found = 1; print; next }
+            }
+            found { print }
+          ' CHANGELOG.md > release_notes.md
+
+          if [ ! -s release_notes.md ]; then
+            {
+              printf '## auditrum %s\n\n' "$VERSION"
+              printf 'See [CHANGELOG.md](https://github.com/%s/blob/main/CHANGELOG.md) for the full release notes.\n' "$REPO"
+            } > release_notes.md
+          fi
+
+          printf -- '--- release_notes.md ---\n'
+          cat release_notes.md
+
+      - name: Create GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          body_path: release_notes.md
+          files: dist/*
+          draft: false
+          prerelease: ${{ contains(github.ref_name, '-') }}
+          fail_on_unmatched_files: true
+          generate_release_notes: false
