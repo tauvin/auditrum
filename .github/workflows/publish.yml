@@ -48,7 +48,10 @@ jobs:
         run: uv run pytest tests/ -q --no-header
 
       - name: Lint
-        run: uv run ruff check .
+        # ``uvx`` runs ruff via uv's tool runner — downloaded on demand,
+        # cached, isolated from project deps. Pinning the minor (``@0.15``)
+        # keeps CI reproducible without putting ruff in pyproject.toml.
+        run: uvx ruff@0.15 check .
 
   # ---------------------------------------------------------------------
   # Step 2: build wheels + sdist, validate version, publish to PyPI.
