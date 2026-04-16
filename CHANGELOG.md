@@ -48,6 +48,14 @@ at runtime.
 - **CI workflow** at ``.github/workflows/ci.yml`` running ``ty``,
   ``pytest``, and ``ruff`` on every push to ``main`` and every PR.
   ``publish.yml`` remains the release-time gate.
+- **Property-based test suite** at ``tests/test_properties.py`` using
+  ``hypothesis`` and ``pglast``. Four blocks per ROADMAP 0.4: identifier
+  regex fuzz against ``validate_identifier``, ``FieldFilter`` ``only`` /
+  ``exclude`` combinatorics, ``TrackSpec.build`` checksum stability, and
+  render → parse round-trip that feeds every generated trigger SQL back
+  through a real PostgreSQL parser. Catches template regressions
+  (missing semicolons, unbalanced ``DO $$…$$`` blocks, bad quoting)
+  that string-level assertions silently miss.
 - ``__all__`` declarations on all public modules (core, Django
   integration, SQLAlchemy integration, observability). Locks the public
   surface so wildcard imports, static analysis, and auto-generated docs

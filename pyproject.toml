@@ -56,6 +56,8 @@ test = [
     "pytest>=7.0",
     "pytest-django>=4.5",
     "testcontainers[postgres]>=4.0",
+    "hypothesis>=6.100",
+    "pglast>=6.0",
 ]
 typecheck = [
     "ty==0.0.31",
