@@ -2,6 +2,11 @@ import re
 
 from django.conf import settings
 
+__all__ = [
+    "AuditSettings",
+    "audit_settings",
+]
+
 # Postgres custom GUCs are required to have the form `<class>.<name>` where
 # both halves are simple identifiers. We validate user-supplied GUC names
 # against this regex before they are interpolated into PL/pgSQL function

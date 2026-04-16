@@ -28,6 +28,7 @@ and call into this module.
 """
 
 from auditrum.tracking.manager import (
+    DiffEntry,
     SyncReport,
     TriggerAction,
     TriggerManager,
@@ -36,11 +37,12 @@ from auditrum.tracking.manager import (
 from auditrum.tracking.spec import FieldFilter, TrackSpec, TriggerBundle
 
 __all__ = [
-    "TrackSpec",
+    "DiffEntry",
     "FieldFilter",
+    "SyncReport",
+    "TrackSpec",
+    "TriggerAction",
     "TriggerBundle",
     "TriggerManager",
     "TriggerStatus",
-    "TriggerAction",
-    "SyncReport",
 ]

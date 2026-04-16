@@ -57,6 +57,10 @@ test = [
     "pytest-django>=4.5",
     "testcontainers[postgres]>=4.0",
 ]
+typecheck = [
+    "ty==0.0.31",
+    "django-stubs>=5.0,<6",
+]
 
 [project.urls]
 Homepage = "https://github.com/tauvin/auditrum"

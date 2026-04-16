@@ -17,6 +17,15 @@ from auditrum.schema import (
 )
 from auditrum.tracking import FieldFilter, SyncReport, TrackSpec, TriggerManager
 
+__all__ = [
+    "SQLAlchemyExecutor",
+    "bootstrap_schema",
+    "clear_registry",
+    "registered_specs",
+    "sync",
+    "track_table",
+]
+
 if TYPE_CHECKING:
     from sqlalchemy import Table
     from sqlalchemy.engine import Connection, Engine

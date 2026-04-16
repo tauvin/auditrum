@@ -20,6 +20,11 @@ from django.db.migrations.operations.base import Operation
 
 from auditrum.tracking import FieldFilter, TrackSpec, TriggerManager
 
+__all__ = [
+    "InstallTrigger",
+    "UninstallTrigger",
+]
+
 
 def _spec_to_deconstruct_kwargs(spec: TrackSpec) -> dict[str, Any]:
     kwargs: dict[str, Any] = {"table": spec.table}

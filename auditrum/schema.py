@@ -4,6 +4,16 @@ from dateutil.relativedelta import relativedelta
 
 from auditrum.tracking.spec import validate_identifier
 
+__all__ = [
+    "generate_audit_attach_context_sql",
+    "generate_audit_context_table_sql",
+    "generate_audit_current_user_id_sql",
+    "generate_audit_reconstruct_sql",
+    "generate_auditlog_partitions_sql",
+    "generate_auditlog_table_sql",
+    "generate_jsonb_diff_function_sql",
+]
+
 
 def generate_audit_context_table_sql(context_table: str = "audit_context") -> str:
     """Generate SQL for the context table that groups events by request/job/command.

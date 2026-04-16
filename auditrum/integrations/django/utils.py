@@ -1,12 +1,18 @@
+from datetime import datetime
+from typing import Any, Protocol
+
 from django.contrib.admin.templatetags.admin_urls import admin_urlname
 from django.db import models
 from django.shortcuts import resolve_url
-from django.utils import timezone
 from django.utils.formats import date_format
 from django.utils.html import format_html
 from django.utils.safestring import mark_safe
 
 from auditrum.utils import audit_tracked  # re-exported for backwards compatibility
+
+
+class _ExecuteCursor(Protocol):
+    def execute(self, query: str, params: Any = ..., /) -> Any: ...
 
 __all__ = [
     "audit_tracked",
@@ -23,8 +29,8 @@ def link(href: str, text: str) -> str:
     return format_html('<a href="{}">{}</a>', href, text)
 
 
-def link_to_related_object(obj: models.Model, name: str = None) -> str:
-    url = resolve_url(admin_urlname(obj._meta, "change"), obj.pk)
+def link_to_related_object(obj: models.Model, name: str | None = None) -> str:
+    url = resolve_url(admin_urlname(obj._meta, "change"), obj.pk)  # ty: ignore[invalid-argument-type]
     return link(url, name or str(obj))
 
 
@@ -49,7 +55,7 @@ def resolve_field_value(model_class, field_name, value):
             try:
                 parsed = value
                 if isinstance(value, str):
-                    parsed = timezone.datetime.fromisoformat(value)
+                    parsed = datetime.fromisoformat(value)
                 if isinstance(field, models.DateTimeField):
                     value = date_format(parsed, format="DATETIME_FORMAT")
                 elif isinstance(field, models.DateField):
@@ -124,6 +130,11 @@ def render_log_changes(log):
     return mark_safe("<em class='text-gray-500'>No changes</em>")
 
 
-def set_var(cursor, key: str, value) -> None:
+def set_var(cursor: _ExecuteCursor, key: str, value: Any) -> None:
+    # set_config(name, value, is_local=false) is the parameterised form
+    # of SET — both the GUC name and value go through psycopg's binding
+    # layer, so an attacker-controlled `key` can't break out into DDL.
+    # The f-string version that used to live here was a real injection
+    # surface any time `key` wasn't a compile-time constant.
     if value is not None:
-        cursor.execute(f"SET {key} = %s", [str(value)])
+        cursor.execute("SELECT set_config(%s, %s, false)", [key, str(value)])

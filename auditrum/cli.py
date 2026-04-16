@@ -1,5 +1,6 @@
 from collections.abc import Callable
 from functools import lru_cache
+from typing import Literal, cast
 
 import structlog
 import typer
@@ -20,6 +21,8 @@ from auditrum.schema import (
 from auditrum.settings import PgAuditSettings
 from auditrum.timetravel import reconstruct_row, reconstruct_table
 from auditrum.triggers import generate_trigger_sql
+
+__all__ = ["app"]
 
 load_dotenv()
 
@@ -249,7 +252,12 @@ def run_static_sql(
 
     try:
         with connect(dsn=db_dsn) as conn, conn.cursor() as cur:
-            cur.execute(sql)
+            # Trust boundary: `sql` is produced by auditrum's own
+            # generators (schema/triggers/hardening/...), each of which
+            # pipes every identifier through `validate_identifier` before
+            # it reaches an f-string. pglast round-trip fuzzing planned
+            # in ROADMAP 0.4 is the stronger long-term guard.
+            cur.execute(sql)  # ty: ignore[invalid-argument-type]
             conn.commit()
             log.info("SQL successfully executed")
     except Exception as e:
@@ -275,7 +283,9 @@ def execute_or_print_sql(
                 return
 
             with conn.cursor() as cur:
-                cur.execute(sql)
+                # Same trust boundary as run_static_sql: `sql_fn` is one
+                # of auditrum's validated generators.
+                cur.execute(sql)  # ty: ignore[invalid-argument-type]
             conn.commit()
             log.info("SQL successfully executed")
     except Exception as e:
@@ -455,6 +465,7 @@ def blame(
     if fmt not in ("rich", "text", "json"):
         log.error("format must be one of rich/text/json", got=fmt)
         return
+    fmt_choice = cast(Literal["rich", "text", "json"], fmt)
 
     try:
         with connect(dsn=db_dsn) as conn:
@@ -473,7 +484,7 @@ def blame(
     output = format_blame(
         entries,
         field=field,
-        fmt=fmt,  # type: ignore[arg-type]
+        fmt=fmt_choice,
         table=table,
         object_id=object_id,
     )

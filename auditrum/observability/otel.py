@@ -16,6 +16,8 @@ from __future__ import annotations
 
 from typing import Any
 
+__all__ = ["enrich_metadata"]
+
 
 def enrich_metadata(metadata: dict[str, Any]) -> dict[str, Any]:
     """Merge OTel trace identifiers into ``metadata`` if possible.

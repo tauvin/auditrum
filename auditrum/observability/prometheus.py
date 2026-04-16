@@ -34,6 +34,8 @@ from psycopg import sql as pg_sql
 
 from auditrum.tracking.spec import validate_identifier
 
+__all__ = ["AuditrumCollector"]
+
 
 class AuditrumCollector:
     """prometheus_client collector exposing audit event counts.

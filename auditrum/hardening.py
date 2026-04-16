@@ -30,6 +30,11 @@ See :doc:`../../docs/hardening.md` for the full deployment guide.
 
 from auditrum.tracking.spec import validate_identifier
 
+__all__ = [
+    "generate_grant_admin_sql",
+    "generate_revoke_sql",
+]
+
 
 def generate_revoke_sql(
     table_name: str = "auditlog",

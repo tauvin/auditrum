@@ -25,6 +25,11 @@ from psycopg import sql
 
 from auditrum.tracking.spec import validate_identifier
 
+__all__ = [
+    "drop_old_partitions",
+    "generate_purge_sql",
+]
+
 _INTERVAL_RE = re.compile(
     r"^\s*(\d+)\s*(day|days|week|weeks|month|months|year|years)\s*$", re.IGNORECASE
 )

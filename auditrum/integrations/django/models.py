@@ -11,6 +11,13 @@ if TYPE_CHECKING:
     from django.contrib.auth.models import AbstractBaseUser
     from django.db.models import Model
 
+__all__ = [
+    "AuditContext",
+    "AuditLog",
+    "AuditLogManager",
+    "AuditLogQuerySet",
+]
+
 
 class AuditLogQuerySet(models.QuerySet):
     """QuerySet with single-table-aware helpers for audit history lookups.
@@ -57,7 +64,12 @@ class AuditLogQuerySet(models.QuerySet):
         return self.order_by("-changed_at")[:limit]
 
 
-class AuditLogManager(models.Manager.from_queryset(AuditLogQuerySet)):  # type: ignore[misc]
+class AuditLogManager(models.Manager.from_queryset(AuditLogQuerySet)):  # ty: ignore[unsupported-base]
+    # Manager.from_queryset() returns a dynamically-built subclass whose
+    # identity type checkers can't statically infer. The pattern is the
+    # standard Django idiom for copying queryset methods onto a manager,
+    # so we accept the base-class unknown here rather than duplicate
+    # every QuerySet method on the manager by hand.
     """Default manager for :class:`AuditLog` exposing the queryset helpers."""
 
     def get_queryset(self) -> AuditLogQuerySet:

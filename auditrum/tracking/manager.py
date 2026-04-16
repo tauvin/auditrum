@@ -22,6 +22,14 @@ from typing import Any
 from auditrum.executor import ConnectionExecutor
 from auditrum.tracking.spec import TrackSpec, TriggerBundle, validate_identifier
 
+__all__ = [
+    "DiffEntry",
+    "SyncReport",
+    "TriggerAction",
+    "TriggerManager",
+    "TriggerStatus",
+]
+
 
 class TriggerStatus(Enum):
     NOT_INSTALLED = "not_installed"
@@ -60,6 +68,9 @@ _TRACKING_TABLE_DEFAULT = "auditrum_applied_triggers"
 
 
 def _tracking_table_ddl(table_name: str) -> str:
+    # Defense-in-depth: callers should already have validated, but the
+    # identifier reaches an f-string so we enforce the boundary here too.
+    validate_identifier(table_name, "table_name")
     return f"""
 CREATE TABLE IF NOT EXISTS {table_name} (
     trigger_name text PRIMARY KEY,
@@ -98,7 +109,14 @@ class TriggerManager:
     ) -> None:
         validate_identifier(tracking_table, "tracking_table")
         self.executor = executor
-        self.tracking_table = tracking_table
+        self._tracking_table = tracking_table
+
+    @property
+    def tracking_table(self) -> str:
+        # Read-only so the validated value from __init__ can't be
+        # swapped out later and sneak an unchecked identifier into an
+        # f-string in _fetch_stored / list_installed / _upsert_tracking.
+        return self._tracking_table
 
     # ------------------------------------------------------------------
     # Bootstrap

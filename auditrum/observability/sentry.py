@@ -11,6 +11,8 @@ from __future__ import annotations
 import contextlib
 from typing import Any
 
+__all__ = ["add_breadcrumb_for_context"]
+
 
 def add_breadcrumb_for_context(
     metadata: dict[str, Any], *, category: str = "auditrum"

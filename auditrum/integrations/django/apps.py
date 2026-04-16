@@ -5,6 +5,8 @@ from django.apps import AppConfig, apps
 from auditrum.context import audit_context
 from auditrum.integrations.django.executor import DjangoExecutor
 
+__all__ = ["PgAuditIntegrationConfig"]
+
 
 class PgAuditIntegrationConfig(AppConfig):
     default_auto_field = "django.db.models.BigAutoField"

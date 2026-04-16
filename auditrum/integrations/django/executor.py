@@ -2,6 +2,8 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from typing import Any
 
+__all__ = ["DjangoExecutor"]
+
 
 class DjangoExecutor:
     """ConnectionExecutor backed by a Django database wrapper.

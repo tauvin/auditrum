@@ -45,6 +45,13 @@ from psycopg import sql as pg_sql
 
 from auditrum.tracking.spec import validate_identifier
 
+__all__ = [
+    "HistoricalRow",
+    "reconstruct_field_history",
+    "reconstruct_row",
+    "reconstruct_table",
+]
+
 
 @dataclass(frozen=True)
 class HistoricalRow:

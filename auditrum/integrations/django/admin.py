@@ -3,6 +3,11 @@ from django.utils.html import format_html
 
 from auditrum.integrations.django.models import AuditContext, AuditLog
 
+__all__ = [
+    "AuditContextAdmin",
+    "AuditLogAdmin",
+]
+
 
 @admin.register(AuditContext)
 class AuditContextAdmin(admin.ModelAdmin):
@@ -11,10 +16,9 @@ class AuditContextAdmin(admin.ModelAdmin):
     ordering = ("-created_at",)
     search_fields = ("id",)
 
+    @admin.display(description="Events")
     def event_count(self, obj):
         return obj.events.count()
-
-    event_count.short_description = "Events"
 
 
 @admin.register(AuditLog)
@@ -33,6 +37,7 @@ class AuditLogAdmin(admin.ModelAdmin):
     readonly_fields = [f.name for f in AuditLog._meta.fields]
     ordering = ("-changed_at",)
 
+    @admin.display(description="Linked Object")
     def linked_object(self, obj):
         try:
             target = obj.content_object
@@ -47,5 +52,3 @@ class AuditLogAdmin(admin.ModelAdmin):
             except Exception:
                 return str(target)
         return str(target)
-
-    linked_object.short_description = "Linked Object"

@@ -19,6 +19,13 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from typing import Any, Protocol, runtime_checkable
 
+__all__ = [
+    "ConnectionExecutor",
+    "CursorProtocol",
+    "NullExecutor",
+    "PsycopgExecutor",
+]
+
 
 class CursorProtocol(Protocol):
     def execute(self, query: Any, params: Any = ...) -> Any: ...

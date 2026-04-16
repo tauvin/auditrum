@@ -35,5 +35,8 @@ class Command(BaseCommand):
         )
 
         with psycopg.connect(db_dsn) as conn, conn.cursor() as cur:
-            cur.execute(sql)
+            # `sql` comes from generate_auditlog_partitions_sql, whose
+            # table name is validated via validate_identifier. See
+            # auditrum/schema.py:151 for the trust boundary.
+            cur.execute(sql)  # ty: ignore[invalid-argument-type]
         self.stdout.write(self.style.SUCCESS("Partitions created successfully."))

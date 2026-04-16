@@ -4,6 +4,8 @@ from typing import Any
 
 from auditrum.context import audit_context
 
+__all__ = ["audit_tracked"]
+
 
 @contextmanager
 def audit_tracked(**kwargs: Any) -> Iterator[None]:

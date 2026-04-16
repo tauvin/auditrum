@@ -8,6 +8,11 @@ from django.conf import settings as django_settings
 from auditrum.integrations.django.runtime import auditrum_context
 from auditrum.integrations.django.settings import audit_settings
 
+__all__ = [
+    "AuditrumMiddleware",
+    "RequestIDMiddleware",
+]
+
 
 def _hash_session_key(session_key: str | None) -> str | None:
     """One-way HMAC of the session key keyed by the project ``SECRET_KEY``.

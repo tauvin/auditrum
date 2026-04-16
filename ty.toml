@@ -1,0 +1,24 @@
+# ty config for auditrum. Paired with the "typecheck" extras in pyproject.toml.
+# Run via: uv run ty check
+
+[environment]
+python-version = "3.11"
+
+[src]
+# Scope per ROADMAP 0.4: core + Django integration only. SQLAlchemy and
+# observability are public-experimental and get polished in the 1.x line.
+include = ["auditrum"]
+exclude = [
+    "auditrum/integrations/sqlalchemy",
+    "auditrum/observability",
+]
+
+[rules]
+
+[analysis]
+respect-type-ignore-comments = true
+
+[terminal]
+# Core + Django integration are clean as of 0.4 typing gate; any new
+# warning should block CI until triaged.
+error-on-warning = true

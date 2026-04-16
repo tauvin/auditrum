@@ -2,6 +2,12 @@ from psycopg import sql
 
 from auditrum.tracking.spec import validate_identifier
 
+__all__ = [
+    "generate_revert_sql",
+    "generate_revert_sql_from_log",
+    "get_revert_columns_from_log",
+]
+
 
 def get_revert_columns_from_log(conn, audit_table: str, log_id: int) -> list[str]:
     """Return the column names that should be restored when reverting a log entry.

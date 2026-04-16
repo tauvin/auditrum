@@ -1,5 +1,6 @@
 from collections.abc import Iterator
 from datetime import datetime
+from typing import TYPE_CHECKING
 
 from django.contrib.contenttypes.models import ContentType
 from django.core.paginator import EmptyPage, PageNotAnInteger, Paginator
@@ -15,8 +16,30 @@ from auditrum.timetravel import (
     reconstruct_table,
 )
 
+# The mixins below are designed to be combined with Django classes at the
+# call-site (AuditedModelMixin with models.Model, AuditHistoryMixin with
+# admin.ModelAdmin). We swap the base under TYPE_CHECKING so a type checker
+# sees the attributes those parent classes provide (_meta, pk, admin_site,
+# model, get_object, get_urls...) while at runtime the mixin stays a plain
+# object base — so `class Foo(MyMixin, models.Model)` still gives models.Model
+# metaclass precedence, not a MRO conflict.
+if TYPE_CHECKING:
+    from django.contrib.admin import ModelAdmin
+    from django.db.models import Model
 
-class AuditedModelMixin:
+    _ModelBase = Model
+    _ModelAdminBase = ModelAdmin
+else:
+    _ModelBase = object
+    _ModelAdminBase = object
+
+__all__ = [
+    "AuditHistoryMixin",
+    "AuditedModelMixin",
+]
+
+
+class AuditedModelMixin(_ModelBase):
     """Model mixin exposing per-instance audit history, time-travel, and field timelines.
 
     All methods are read-only helpers built on top of the framework-agnostic
@@ -107,7 +130,7 @@ class AuditedModelMixin:
             )
 
 
-class AuditHistoryMixin:
+class AuditHistoryMixin(_ModelAdminBase):
     def get_urls(self):
         urls = super().get_urls()
         custom_urls = [

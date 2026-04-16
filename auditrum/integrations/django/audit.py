@@ -22,6 +22,11 @@ from auditrum.integrations.django.tracking import (
     register as _imperative_register,
 )
 
+__all__ = [
+    "register",
+    "registry",
+]
+
 
 def register(model_cls: type[Model], **kwargs: Any) -> None:
     """Legacy imperative register. See ``integrations.django.tracking.register``."""

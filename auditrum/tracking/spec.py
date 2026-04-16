@@ -17,6 +17,14 @@ from typing import Literal
 
 from auditrum.tracking._template import render
 
+__all__ = [
+    "FieldFilter",
+    "FieldFilterKind",
+    "TrackSpec",
+    "TriggerBundle",
+    "validate_identifier",
+]
+
 _IDENT_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
 
@@ -39,12 +47,6 @@ def validate_identifier(name: str, label: str) -> str:
             f"Invalid {label}: {name!r} (must match {_IDENT_RE.pattern})"
         )
     return name
-
-
-# Internal alias kept for backwards compatibility with code that imported
-# the underscore-prefixed name during 0.2 / 0.3 development. New code
-# should import :func:`validate_identifier` directly.
-_validate_ident = validate_identifier
 
 
 FieldFilterKind = Literal["all", "only", "exclude"]

@@ -1,13 +1,13 @@
 import pytest
 
-from auditrum.triggers import _validate_ident, generate_trigger_sql
+from auditrum.triggers import generate_trigger_sql, validate_identifier
 
 
 class TestValidateIdent:
     def test_accepts_snake_case(self):
-        assert _validate_ident("users", "table_name") == "users"
-        assert _validate_ident("my_table_v2", "table_name") == "my_table_v2"
-        assert _validate_ident("_private", "table_name") == "_private"
+        assert validate_identifier("users", "table_name") == "users"
+        assert validate_identifier("my_table_v2", "table_name") == "my_table_v2"
+        assert validate_identifier("_private", "table_name") == "_private"
 
     @pytest.mark.parametrize(
         "bad",
@@ -24,11 +24,11 @@ class TestValidateIdent:
     )
     def test_rejects_injection(self, bad):
         with pytest.raises(ValueError, match="Invalid table_name"):
-            _validate_ident(bad, "table_name")
+            validate_identifier(bad, "table_name")
 
     def test_rejects_non_string(self):
         with pytest.raises(ValueError):
-            _validate_ident(None, "table_name")  # type: ignore[arg-type]
+            validate_identifier(None, "table_name")  # type: ignore[arg-type]
 
 
 class TestGenerateTriggerSql:

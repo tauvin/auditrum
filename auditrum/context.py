@@ -7,6 +7,13 @@ from typing import Any
 
 from auditrum.executor import ConnectionExecutor, NullExecutor
 
+__all__ = [
+    "AuditContext",
+    "audit_context",
+    "with_change_reason",
+    "with_context",
+]
+
 _IDENT_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
 

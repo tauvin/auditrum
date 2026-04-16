@@ -286,6 +286,7 @@ directly on GitHub. Start with:
 - [Architecture](docs/architecture.md) — schema, indexes, trigger flow, concurrency
 
 Changelog: [CHANGELOG.md](CHANGELOG.md)
+Roadmap to 1.0: [ROADMAP.md](ROADMAP.md)
 
 ---
 

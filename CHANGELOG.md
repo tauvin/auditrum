@@ -8,7 +8,92 @@ the API stabilises.
 
 ## [Unreleased]
 
-Nothing yet. Open an issue or PR if there's something you'd like to see.
+This release kicks off the 0.4 API-stabilization cycle per
+``ROADMAP.md``: public surface locked via ``__all__``, a strict static
+typing gate enforced in CI, and a handful of latent bugs — plus one
+real SQL-injection vector — surfaced by the typing pass.
+
+### Security
+
+#### SQL injection fix in ``auditrum.integrations.django.utils.set_var``
+
+The helper previously built a ``SET {key} = %s`` statement via f-string
+interpolation of the ``key`` argument, which meant any caller-controlled
+``key`` could inject arbitrary SQL ahead of the ``=``. It now uses
+``SELECT set_config(%s, %s, false)`` — both the GUC name and the value
+go through psycopg's parameter binding, so there is no raw string path
+for an attacker-controlled identifier to reach the wire.
+
+Behaviour for well-formed callers is unchanged (session-level variable
+assignment). Ill-formed keys that previously produced a SQL syntax
+error — or worse, silently widened an injection — now raise an explicit
+``InvalidParameterValue`` from Postgres.
+
+The ``cursor`` parameter also gained a ``Protocol`` type annotation, so
+misuse (passing a non-cursor) is caught by the type checker rather than
+at runtime.
+
+### Added
+
+- **Strict static typing gate.** ``ty`` (Astral, pinned to ``0.0.31``)
+  checks ``auditrum/`` core and ``auditrum/integrations/django/`` on
+  every push and PR. Config lives in ``ty.toml`` for now; it moves into
+  ``pyproject.toml`` as part of the 0.7 RC cleanup. SQLAlchemy and
+  observability helpers stay out of the gate — both are marked
+  ``public-experimental`` in the roadmap and get polished alongside
+  other integrations in the 1.x line.
+- **``django-stubs>=5.0``** pinned in the new ``typecheck`` extras group
+  so the Django integration gets strict type coverage against the
+  community stubs.
+- **CI workflow** at ``.github/workflows/ci.yml`` running ``ty``,
+  ``pytest``, and ``ruff`` on every push to ``main`` and every PR.
+  ``publish.yml`` remains the release-time gate.
+- ``__all__`` declarations on all public modules (core, Django
+  integration, SQLAlchemy integration, observability). Locks the public
+  surface so wildcard imports, static analysis, and auto-generated docs
+  see a consistent view of what is and is not part of the supported API.
+
+### Fixed
+
+- ``auditrum.integrations.django.utils.resolve_field_value`` no longer
+  crashes on string date values with ``AttributeError: module
+  'django.utils.timezone' has no attribute 'datetime'``. The helper now
+  uses ``datetime.fromisoformat`` from the standard library, which was
+  the intended call — ``django.utils.timezone`` never exposed a
+  ``.datetime`` attribute, so this code path raised for every caller
+  that passed a string date.
+- ``link_to_related_object(obj, name=None)`` now declares
+  ``name: str | None`` instead of ``name: str``. The runtime already
+  accepted ``None`` via the ``name or str(obj)`` guard; the signature
+  was simply wrong.
+- ``auditrum blame`` no longer papers over its ``fmt`` argument with a
+  stale ``# type: ignore[arg-type]`` comment. Runtime validation is
+  unchanged; the signature now reflects it via ``cast(Literal[...])``
+  after the existing runtime check.
+
+### Changed
+
+- **``TriggerManager.tracking_table`` is now a read-only property.** The
+  value is still validated via ``validate_identifier`` once in
+  ``__init__``; making the attribute read-only ensures the validated
+  identifier cannot be swapped out post-construction and sneak an
+  unchecked string into the f-string-built SQL in ``_fetch_stored``,
+  ``list_installed``, ``_upsert_tracking``, or ``_delete_tracking``.
+  Callers that only read ``mgr.tracking_table`` are unaffected; callers
+  that *assigned* to it (not a documented pattern) now raise
+  ``AttributeError``.
+- ``_tracking_table_ddl(table_name)`` re-validates its argument at
+  entry (defence in depth) so direct internal misuse can't bypass the
+  check established at ``TriggerManager.__init__``.
+
+### Removed
+
+- **Breaking:** the ``_validate_ident`` legacy alias in
+  ``auditrum.tracking.spec`` and ``auditrum.triggers``. The canonical
+  name has been ``validate_identifier`` since 0.3.0; the underscore-
+  prefixed alias was only retained as a drop-in for 0.2 callers. Import
+  ``validate_identifier`` directly. Nothing else in the public surface
+  changed.
 
 ## [0.3.1] — 2026-04-14
 

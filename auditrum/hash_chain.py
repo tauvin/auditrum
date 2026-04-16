@@ -55,6 +55,12 @@ Caveats:
 
 from auditrum.tracking.spec import validate_identifier
 
+__all__ = [
+    "generate_hash_chain_sql",
+    "get_chain_tip",
+    "verify_chain",
+]
+
 # The shared SQL fragment that produces the canonical bytes hashed by both
 # the insert trigger and the server-side verify query. Keeping this in one
 # constant guarantees that the two SQL paths cannot drift.

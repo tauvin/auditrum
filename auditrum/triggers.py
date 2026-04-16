@@ -14,7 +14,6 @@ from dataclasses import dataclass
 from auditrum.tracking.spec import (
     FieldFilter,
     TrackSpec,
-    _validate_ident,
     validate_identifier,
 )
 
@@ -23,9 +22,6 @@ __all__ = [
     "build_trigger_spec",
     "generate_trigger_sql",
     "validate_identifier",
-    # Legacy alias, kept for callers that imported the underscore-prefixed
-    # name during 0.2 / 0.3 development.
-    "_validate_ident",
 ]
 
 
@@ -137,7 +133,7 @@ def generate_trigger_sql(
     """Render full ``CREATE FUNCTION`` + ``CREATE TRIGGER`` SQL for one table.
 
     Thin wrapper around :meth:`TrackSpec.build`. Identifiers are validated
-    via :func:`_validate_ident` (reused from :mod:`auditrum.tracking.spec`)
+    via :func:`validate_identifier` (reused from :mod:`auditrum.tracking.spec`)
     so SQL injection through user-supplied names is blocked at construction
     time. ``log_conditions`` is trusted PL/pgSQL — never pass user input.
     """

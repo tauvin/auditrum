@@ -25,6 +25,14 @@ from typing import TYPE_CHECKING, Any, TypeVar
 
 from auditrum.tracking import FieldFilter, TrackSpec
 
+__all__ = [
+    "clear_registry",
+    "get_registered_specs",
+    "register",
+    "specs_by_app_label",
+    "track",
+]
+
 if TYPE_CHECKING:
     from django.db.models import Model
 

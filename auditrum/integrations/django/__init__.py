@@ -12,6 +12,13 @@ specific conveniences so apps can write::
         ...
 """
 
+__all__ = [
+    "AuditContext",
+    "AuditLog",
+    "register",
+    "track",
+]
+
 default_app_config = "auditrum.integrations.django.apps.PgAuditIntegrationConfig"
 
 

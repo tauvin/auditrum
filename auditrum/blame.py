@@ -26,6 +26,12 @@ from psycopg import sql as pg_sql
 
 from auditrum.tracking.spec import validate_identifier
 
+__all__ = [
+    "BlameEntry",
+    "fetch_blame",
+    "format_blame",
+]
+
 
 @dataclass(frozen=True)
 class BlameEntry:

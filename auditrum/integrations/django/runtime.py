@@ -43,6 +43,11 @@ from django.db import connection
 
 from auditrum.integrations.django.settings import audit_settings
 
+__all__ = [
+    "auditrum_context",
+    "current_context",
+]
+
 
 @dataclass(frozen=True)
 class _Context:
