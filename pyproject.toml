@@ -54,6 +54,7 @@ observability = [
 ]
 test = [
     "pytest>=7.0",
+    "pytest-cov>=5.0",
     "pytest-django>=4.5",
     "testcontainers[postgres]>=4.0",
     "hypothesis>=6.100",

@@ -56,6 +56,14 @@ at runtime.
   through a real PostgreSQL parser. Catches template regressions
   (missing semicolons, unbalanced ``DO $$…$$`` blocks, bad quoting)
   that string-level assertions silently miss.
+- **Coverage gate** at 80% floor (``.coveragerc``, wired into
+  ``ci.yml``). Initial baseline; the target is 90% by the 0.7 RC per
+  ROADMAP 0.4. New unit suites landed in this release to lift the floor:
+  ``test_django_utils.py`` (locks in the ``set_var`` injection fix and
+  the ``timezone.datetime`` bug fix), ``test_django_partitions_command``
+  (covers the ``audit_add_partitions`` management command with a mocked
+  psycopg connection), ``test_django_templatetags``,
+  ``test_django_shell_context``, ``test_django_init``.
 - ``__all__`` declarations on all public modules (core, Django
   integration, SQLAlchemy integration, observability). Locks the public
   surface so wildcard imports, static analysis, and auto-generated docs
@@ -70,6 +78,14 @@ at runtime.
   the intended call — ``django.utils.timezone`` never exposed a
   ``.datetime`` attribute, so this code path raised for every caller
   that passed a string date.
+- ``auditrum.integrations.django.shell_context`` now actually keeps the
+  ``source="shell"`` stamp alive for the lifetime of the shell session.
+  It previously called ``audit_tracked(...).__enter__()`` on a
+  dangling reference — CPython immediately reclaimed the context
+  manager, which triggered its ``__exit__`` and popped the stamp
+  before the first query could see it. The fix binds the manager to a
+  module-level name and registers an ``atexit`` hook to unwind it
+  cleanly at process shutdown.
 - ``link_to_related_object(obj, name=None)`` now declares
   ``name: str | None`` instead of ``name: str``. The runtime already
   accepted ``None`` via the ``name or str(obj)`` guard; the signature

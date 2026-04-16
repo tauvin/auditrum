@@ -1,0 +1,31 @@
+# Coverage scope mirrors the ty typing gate: core + Django integration.
+# SQLAlchemy and observability helpers stay out per ROADMAP 0.4 (both
+# are public-experimental and get polished in the 1.x line).
+[run]
+source = auditrum
+branch = True
+omit =
+    auditrum/integrations/sqlalchemy/*
+    auditrum/observability/*
+    */migrations/*
+    */templates/*
+    */sql/*
+    */tests/*
+
+[report]
+show_missing = True
+skip_covered = False
+# Initial floor matches the 0.4 baseline. Raise to 90% by 0.7 RC —
+# the gap today is mostly cli.py (CLI dispatch layer) and deep Django
+# admin-URL branches in mixins.py. See ROADMAP.md 0.4 for the plan.
+fail_under = 80
+# Common unreachable-at-runtime patterns; counting them as "uncovered"
+# just inflates the floor with lines that can't be exercised.
+exclude_also =
+    pragma: no cover
+    if TYPE_CHECKING:
+    raise NotImplementedError
+    \.\.\.$
+
+[html]
+directory = htmlcov

@@ -69,8 +69,11 @@ jobs:
             --extra observability \
             --extra test
 
-      - name: Run unit tests
-        run: uv run pytest tests/ -q --no-header
+      # Coverage floor lives in .coveragerc (fail_under=80). Raise as
+      # gaps close per ROADMAP 0.4 — the gate fails the job if we drop
+      # below the floor, which is what we want between releases.
+      - name: Run unit tests with coverage
+        run: uv run pytest tests/ -q --no-header --cov --cov-report=term
 
   lint:
     name: ruff
