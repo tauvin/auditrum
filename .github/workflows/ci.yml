@@ -30,6 +30,10 @@ jobs:
         with:
           version: latest
           enable-cache: true
+          # Distinct suffix per job so the three CI jobs don't race each
+          # other on cache save. Without this they all derive the same
+          # key (no uv.lock present) and two of three lose the race.
+          cache-suffix: typecheck
 
       - name: Set up Python 3.11
         run: uv python install 3.11
@@ -61,6 +65,7 @@ jobs:
         with:
           version: latest
           enable-cache: true
+          cache-suffix: test
 
       - name: Set up Python 3.13
         run: uv python install 3.13
@@ -92,7 +97,10 @@ jobs:
         uses: astral-sh/setup-uv@v7
         with:
           version: latest
-          enable-cache: true
+          # No cache for the lint job — it runs `uvx ruff` in isolation
+          # and doesn't touch the project's uv environment, so caching
+          # only adds noise (and was the third racer on the same key).
+          enable-cache: false
 
       # Pinning the ruff minor keeps formatter output reproducible across
       # contributor machines without wiring ruff into pyproject.toml's
