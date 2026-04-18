@@ -43,8 +43,12 @@ jobs:
 
       # --output-format github emits GitHub Actions annotation lines so
       # failures show up inline in the PR diff, not buried in the job log.
+      # --no-sync + --python 3.11 reuses the venv from the previous step;
+      # without them uv defaults to the latest Python satisfying
+      # requires-python (3.13) and re-syncs without the typecheck extra,
+      # which removes `ty` and breaks the run.
       - name: Run ty
-        run: uv run ty check --output-format github
+        run: uv run --no-sync --python 3.11 ty check --output-format github
 
   test:
     name: Unit tests (Python 3.13)
@@ -72,8 +76,11 @@ jobs:
       # Coverage floor lives in .coveragerc (fail_under=80). Raise as
       # gaps close per ROADMAP 0.4 — the gate fails the job if we drop
       # below the floor, which is what we want between releases.
+      # --no-sync reuses the venv from the previous step; without it
+      # uv re-syncs without the extras and drops pytest / testcontainers /
+      # hypothesis on the floor (same failure mode as the typecheck job).
       - name: Run unit tests with coverage
-        run: uv run pytest tests/ -q --no-header --cov --cov-report=term
+        run: uv run --no-sync pytest tests/ -q --no-header --cov --cov-report=term
 
   lint:
     name: ruff
