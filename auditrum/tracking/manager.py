@@ -162,7 +162,11 @@ class TriggerManager:
                 )
                 if cur.fetchone() is None:
                     raise RuntimeError(
-                        f"bootstrap failed and {self.tracking_table} still missing"
+                        f"TriggerManager bootstrap failed: {self.tracking_table!r} "
+                        f"is still missing after a DuplicateTable retry. Check "
+                        f"that the active role has CREATE privileges on the "
+                        f"target schema, and inspect the Postgres server log "
+                        f"for the original failure."
                     )
         except Exception:
             raise

@@ -53,7 +53,10 @@ def _to_track_spec(
 ) -> TrackSpec:
     if track_only is not None and exclude_fields is not None:
         raise ValueError(
-            f"Cannot specify both track_only and exclude_fields for table {table_name}"
+            f"Cannot specify both track_only and exclude_fields for table "
+            f"{table_name!r} — choose one: pass track_only=[...] to audit "
+            f"only those columns, or exclude_fields=[...] to audit every "
+            f"column except those."
         )
     # Preserve historical error labels for the legacy facade. The tracking
     # module uses terser labels internally; users of the raw ``generate_*``

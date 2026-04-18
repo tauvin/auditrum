@@ -76,10 +76,17 @@ class FieldFilter:
         for f in self.fields:
             validate_identifier(f, f"{self.kind}_field")
         if self.kind == "all" and self.fields:
-            raise ValueError("FieldFilter.all() must not carry field names")
+            raise ValueError(
+                "FieldFilter.all() must not carry field names — use "
+                "FieldFilter.only(*fields) to whitelist columns or "
+                "FieldFilter.exclude(*fields) to blacklist them."
+            )
         if self.kind in ("only", "exclude") and not self.fields:
             raise ValueError(
-                f"FieldFilter.{self.kind}() requires at least one field"
+                f"FieldFilter.{self.kind}() requires at least one field name "
+                f"— call FieldFilter.{self.kind}('col_a', 'col_b', ...) with "
+                f"the columns you want to {self.kind}, or use "
+                f"FieldFilter.all() to audit every column."
             )
 
     @classmethod

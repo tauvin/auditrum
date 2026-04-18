@@ -59,7 +59,10 @@ def _parse_interval(expr: str) -> relativedelta:
         return relativedelta(months=n)
     if unit.startswith("year"):
         return relativedelta(years=n)
-    raise ValueError(f"Unsupported unit: {unit}")
+    raise ValueError(
+        f"Unsupported retention interval unit: {unit!r}. Supported units are "
+        f"'day'/'days', 'week'/'weeks', 'month'/'months', 'year'/'years'."
+    )
 
 
 def _cutoff_for(expr: str) -> datetime:

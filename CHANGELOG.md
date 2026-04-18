@@ -63,7 +63,16 @@ at runtime.
   the ``timezone.datetime`` bug fix), ``test_django_partitions_command``
   (covers the ``audit_add_partitions`` management command with a mocked
   psycopg connection), ``test_django_templatetags``,
-  ``test_django_shell_context``, ``test_django_init``.
+  ``test_django_shell_context``, ``test_django_init``,
+  ``test_django_audit`` (the legacy ``_LegacyRegistryView`` dict-proxy).
+- **Dead-code audit** (``vulture`` + ``ruff F401/F811/F841``) across
+  ``auditrum/`` core and the Django integration turned up 13 candidates,
+  all of which were protocol-required parameters (``__exit__``
+  ``exc_type``/``tb``, Django ``Operation.database_forwards``
+  ``state``/``from_state``/``to_state``) or ``TYPE_CHECKING``-only
+  imports used in string annotations. No real removals; documenting
+  the clean result so future audits don't re-investigate the same
+  false positives.
 - ``__all__`` declarations on all public modules (core, Django
   integration, SQLAlchemy integration, observability). Locks the public
   surface so wildcard imports, static analysis, and auto-generated docs
@@ -97,6 +106,20 @@ at runtime.
 
 ### Changed
 
+- **Error messages in the public API now include remediation hints**,
+  not just "what's wrong". Auditing each ``raise ValueError`` /
+  ``raise RuntimeError`` site produced five upgrades:
+  ``FieldFilter.all() must not carry field names`` now tells the caller
+  to use ``.only(...)`` or ``.exclude(...)``;
+  ``FieldFilter.only()/exclude() requires at least one field`` explains
+  the calling convention and points to ``FieldFilter.all()`` for the
+  no-filter case; ``generate_trigger_sql`` with both ``track_only`` and
+  ``exclude_fields`` now spells out what each argument does and that
+  they're mutually exclusive; the retention-interval "Unsupported unit"
+  error lists every recognised unit; and ``TriggerManager.bootstrap``
+  points users at CREATE-privilege checks and the Postgres server log
+  when the DuplicateTable retry path fails. The exception classes are
+  unchanged so ``try / except ValueError`` still catches the same sites.
 - **``TriggerManager.tracking_table`` is now a read-only property.** The
   value is still validated via ``validate_identifier`` once in
   ``__init__``; making the attribute read-only ensures the validated
