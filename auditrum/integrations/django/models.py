@@ -1,8 +1,6 @@
 import uuid
 from typing import TYPE_CHECKING
 
-from django.contrib.contenttypes.fields import GenericForeignKey
-from django.contrib.contenttypes.models import ContentType
 from django.db import models
 
 from auditrum.integrations.django.settings import audit_settings
@@ -102,11 +100,7 @@ class AuditContext(models.Model):
 class AuditLog(models.Model):
     operation = models.CharField(max_length=16)
     changed_at = models.DateTimeField(auto_now_add=True)
-    content_type = models.ForeignKey(
-        ContentType, null=True, blank=True, on_delete=models.SET_NULL
-    )
     object_id = models.CharField(max_length=255)
-    content_object = GenericForeignKey("content_type", "object_id")
     table_name = models.CharField(max_length=255)
     user_id = models.IntegerField(null=True, blank=True)
     old_data = models.JSONField(null=True, blank=True)

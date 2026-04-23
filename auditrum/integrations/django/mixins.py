@@ -2,7 +2,7 @@ from collections.abc import Iterator
 from datetime import datetime
 from typing import TYPE_CHECKING
 
-from django.contrib.contenttypes.models import ContentType
+from django.contrib.admin.utils import unquote
 from django.core.paginator import EmptyPage, PageNotAnInteger, Paginator
 from django.db import connection as _django_connection
 from django.shortcuts import render
@@ -143,11 +143,15 @@ class AuditHistoryMixin(_ModelAdminBase):
         return custom_urls + urls
 
     def object_history_view(self, request, object_id):
-        obj = self.get_object(request, object_id)
-        content_type = ContentType.objects.get_for_model(self.model)
-        logs = AuditLog.objects.filter(
-            content_type=content_type, object_id=str(object_id)
-        ).order_by("-changed_at")
+        obj = self.get_object(request, unquote(object_id))
+        if obj is None:
+            # django-stubs doesn't expose the underscore-prefixed helper
+            # even though ModelAdmin ships it — same pattern Django's own
+            # admin.options.ModelAdmin.history_view uses.
+            return self._get_obj_does_not_exist_redirect(  # ty: ignore[unresolved-attribute]
+                request, self.model._meta, object_id
+            )
+        logs = AuditLog.objects.for_object(obj).order_by("-changed_at")
 
         paginator = Paginator(logs, 20)
         page_number = request.GET.get("page", 1)

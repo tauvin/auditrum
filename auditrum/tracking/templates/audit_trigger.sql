@@ -37,11 +37,11 @@ BEGIN
     END IF;
 
     INSERT INTO {audit_table} (
-        operation, changed_at, content_type_id, object_id, table_name,
+        operation, changed_at, object_id, table_name,
         user_id, old_data, new_data, diff, context_id, meta
     )
     VALUES (
-        TG_OP, now(), NULL,
+        TG_OP, now(),
         CASE
             WHEN TG_OP = 'DELETE' THEN to_jsonb(OLD)->>'id'
             ELSE to_jsonb(NEW)->>'id'

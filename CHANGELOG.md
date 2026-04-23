@@ -141,6 +141,44 @@ at runtime.
   prefixed alias was only retained as a drop-in for 0.2 callers. Import
   ``validate_identifier`` directly. Nothing else in the public surface
   changed.
+- **Breaking:** ``auditlog.content_type_id`` column plus
+  ``AuditLog.content_type`` / ``AuditLog.content_object``
+  (``GenericForeignKey``) on the Django model. The column was never
+  populated by the framework-agnostic trigger path and every
+  ``AuditLog.objects.filter(content_type=…)`` quietly matched zero
+  rows. The 0.3 admin history page and the ``linked_object`` admin
+  column both routed through this path and were effectively broken —
+  history rendered "No audit records found" for every row, and
+  ``linked_object`` rendered "-" for every entry. The canonical
+  identity key has been ``table_name`` since 0.3.0 (that is what
+  ``AuditLog.objects.for_object`` / ``for_model`` already keyed off),
+  so the GenericForeignKey was dead weight that pulled
+  ``django.contrib.contenttypes``-specific state into a
+  framework-agnostic schema. A new ``0002_drop_content_type_id``
+  Django migration drops the column for existing installs; fresh
+  installs skip it at ``0001_initial`` time.
+
+### Fixed
+
+- ``AuditHistoryMixin.object_history_view`` (Django admin "History"
+  tab) now actually renders audit events instead of a blank table.
+  The 0.3 view filtered ``AuditLog.objects.filter(content_type=…)``,
+  but the PL/pgSQL trigger never wrote ``content_type_id`` — so the
+  admin page silently reported "No audit records found" even when
+  the ``auditlog`` table held rows for the object. The view now
+  routes through :meth:`AuditLogQuerySet.for_object`, the same path
+  the rest of the public API already used. Also adds
+  ``django.contrib.admin.utils.unquote`` on the ``object_id`` URL
+  kwarg and the standard "object does not exist" redirect so the
+  view behaves like the built-in admin history view.
+- ``AuditLogAdmin.linked_object`` resolves the target instance from
+  ``log.table_name`` (via a new ``model_for_table`` helper) instead
+  of the always-NULL GenericForeignKey, so the admin list view's
+  "Linked Object" column renders a real link again.
+- ``render_log_changes`` (shared template helper for diff rendering)
+  resolves the model class from ``log.table_name`` for the same
+  reason — the 0.3 implementation read ``log.content_type`` and
+  always returned the em-dash fallback.
 
 ## [0.3.1] — 2026-04-14
 

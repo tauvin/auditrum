@@ -55,6 +55,7 @@ from auditrum.integrations.django.utils import (  # noqa: E402
     get_user_display,
     link,
     link_to_related_object,
+    model_for_table,
     render_log_changes,
     resolve_field_value,
     set_var,
@@ -230,8 +231,7 @@ class TestGetUserDisplay:
 class TestRenderLogChanges:
     def _log(self, **overrides):
         log = MagicMock()
-        log.content_type = MagicMock()
-        log.content_type.model_class.return_value = MagicMock()
+        log.table_name = "orders"
         log.operation = "UPDATE"
         log.old_data = {"name": "old"}
         log.new_data = {"name": "new"}
@@ -239,16 +239,27 @@ class TestRenderLogChanges:
             setattr(log, k, v)
         return log
 
-    def test_no_content_type_returns_em_dash(self):
-        log = MagicMock()
-        log.content_type = None
-        assert render_log_changes(log) == "—"
+    def test_unknown_table_returns_em_dash(self):
+        # model_for_table returns None for tables that don't map to any
+        # installed model (cross-service audit rows, dropped models).
+        log = self._log()
+        with patch(
+            "auditrum.integrations.django.utils.model_for_table",
+            return_value=None,
+        ):
+            assert render_log_changes(log) == "—"
 
     def test_insert_renders_field_list(self):
         log = self._log(operation="INSERT", new_data={"name": "x"}, old_data=None)
-        with patch(
-            "auditrum.integrations.django.utils.resolve_field_value",
-            return_value=("Name", "x"),
+        with (
+            patch(
+                "auditrum.integrations.django.utils.model_for_table",
+                return_value=MagicMock(),
+            ),
+            patch(
+                "auditrum.integrations.django.utils.resolve_field_value",
+                return_value=("Name", "x"),
+            ),
         ):
             out = render_log_changes(log)
         assert "Name" in out
@@ -256,9 +267,15 @@ class TestRenderLogChanges:
 
     def test_delete_renders_strikethrough_list(self):
         log = self._log(operation="DELETE", old_data={"name": "gone"}, new_data=None)
-        with patch(
-            "auditrum.integrations.django.utils.resolve_field_value",
-            return_value=("Name", "gone"),
+        with (
+            patch(
+                "auditrum.integrations.django.utils.model_for_table",
+                return_value=MagicMock(),
+            ),
+            patch(
+                "auditrum.integrations.django.utils.resolve_field_value",
+                return_value=("Name", "gone"),
+            ),
         ):
             out = render_log_changes(log)
         assert "line-through" in out
@@ -266,9 +283,15 @@ class TestRenderLogChanges:
 
     def test_update_renders_diffs(self):
         log = self._log()
-        with patch(
-            "auditrum.integrations.django.utils.resolve_field_value",
-            side_effect=lambda mc, k, v: (k.title(), str(v) if v is not None else "—"),
+        with (
+            patch(
+                "auditrum.integrations.django.utils.model_for_table",
+                return_value=MagicMock(),
+            ),
+            patch(
+                "auditrum.integrations.django.utils.resolve_field_value",
+                side_effect=lambda mc, k, v: (k.title(), str(v) if v is not None else "—"),
+            ),
         ):
             out = render_log_changes(log)
         assert "old" in out
@@ -277,9 +300,29 @@ class TestRenderLogChanges:
 
     def test_update_with_no_changes_returns_placeholder(self):
         log = self._log(old_data={"x": 1}, new_data={"x": 1})
-        with patch(
-            "auditrum.integrations.django.utils.resolve_field_value",
-            return_value=("X", "1"),
+        with (
+            patch(
+                "auditrum.integrations.django.utils.model_for_table",
+                return_value=MagicMock(),
+            ),
+            patch(
+                "auditrum.integrations.django.utils.resolve_field_value",
+                return_value=("X", "1"),
+            ),
         ):
             out = render_log_changes(log)
         assert "No changes" in out
+
+
+class TestModelForTable:
+    def test_returns_matching_model(self):
+        # ContentType is an installed model with a well-known db_table;
+        # we use it as a real lookup target so the test doesn't depend on
+        # any project-local model being defined.
+        from django.contrib.contenttypes.models import ContentType
+
+        resolved = model_for_table(ContentType._meta.db_table)
+        assert resolved is ContentType
+
+    def test_returns_none_for_unknown_table(self):
+        assert model_for_table("__no_such_table__") is None

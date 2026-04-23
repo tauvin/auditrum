@@ -112,3 +112,12 @@ class TestGenerateTriggerSql:
         generate_trigger_sql("users")
         captured = capsys.readouterr()
         assert captured.out == ""
+
+    def test_does_not_write_content_type_id(self):
+        """Triggers must not reference the legacy ``content_type_id`` column.
+
+        The column was dropped in 0.4 — if a trigger still tries to
+        INSERT into it, DDL load will fail with "column does not exist".
+        """
+        sql = generate_trigger_sql("users")
+        assert "content_type_id" not in sql

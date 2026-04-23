@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "auditrum"
-version = "0.3.2"
+version = "0.4.0"
 description = "Auditrum — a PostgreSQL audit system with rich contextual logging and Django integration"
 readme = "README.md"
 authors = [

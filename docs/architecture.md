@@ -144,10 +144,10 @@ BEGIN
     END IF;
 
     INSERT INTO auditlog (
-        operation, changed_at, content_type_id, object_id, table_name,
+        operation, changed_at, object_id, table_name,
         user_id, old_data, new_data, diff, context_id, meta
     ) VALUES (
-        TG_OP, now(), NULL, NULL, TG_TABLE_NAME,
+        TG_OP, now(), NULL, TG_TABLE_NAME,
         _audit_current_user_id(),
         CASE WHEN TG_OP IN ('UPDATE', 'DELETE') THEN to_jsonb(OLD) ELSE NULL END,
         CASE WHEN TG_OP IN ('UPDATE', 'INSERT') THEN to_jsonb(NEW) ELSE NULL END,

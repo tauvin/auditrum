@@ -48,6 +48,17 @@ class TestGenerateAuditlogTableSql:
         sql = generate_auditlog_table_sql()
         assert "auditlog_object_id_idx" not in sql
 
+    def test_no_content_type_id_column(self):
+        """The legacy ``content_type_id`` column is gone as of 0.4.
+
+        The column was Django-specific dead weight — never populated by
+        the framework-agnostic trigger path — and its absence keeps
+        :class:`AuditLog` queries routed through ``table_name`` (the
+        canonical identity key), not a NULL GenericForeignKey.
+        """
+        sql = generate_auditlog_table_sql()
+        assert "content_type_id" not in sql
+
     def test_custom_table_name(self):
         sql = generate_auditlog_table_sql("my_audit")
         assert "CREATE TABLE IF NOT EXISTS my_audit" in sql

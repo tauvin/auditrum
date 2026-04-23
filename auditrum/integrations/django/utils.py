@@ -1,6 +1,7 @@
 from datetime import datetime
 from typing import Any, Protocol
 
+from django.apps import apps
 from django.contrib.admin.templatetags.admin_urls import admin_urlname
 from django.db import models
 from django.shortcuts import resolve_url
@@ -18,11 +19,28 @@ __all__ = [
     "audit_tracked",
     "link",
     "link_to_related_object",
+    "model_for_table",
     "resolve_field_value",
     "get_user_display",
     "render_log_changes",
     "set_var",
 ]
+
+
+def model_for_table(table_name: str) -> type[models.Model] | None:
+    """Resolve a Django model class by its ``_meta.db_table`` name.
+
+    Returns ``None`` when no installed model matches — the caller is
+    expected to fall back to a table-name-only presentation, since audit
+    rows can reference tables that live in a different service or were
+    dropped after the event was recorded. Scans ``apps.get_models()``
+    linearly; the set is small and stable per process, so a cache only
+    pays off under pathological schemas.
+    """
+    for model in apps.get_models():
+        if model._meta.db_table == table_name:
+            return model
+    return None
 
 
 def link(href: str, text: str) -> str:
@@ -75,10 +93,9 @@ def get_user_display(log):
 
 
 def render_log_changes(log):
-    if log.content_type is None:
+    model_class = model_for_table(log.table_name)
+    if model_class is None:
         return "—"
-
-    model_class = log.content_type.model_class()
 
     if log.operation == "INSERT" and log.new_data:
         return format_html(

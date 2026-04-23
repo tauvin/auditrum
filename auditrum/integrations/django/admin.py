@@ -2,6 +2,7 @@ from django.contrib import admin
 from django.utils.html import format_html
 
 from auditrum.integrations.django.models import AuditContext, AuditLog
+from auditrum.integrations.django.utils import model_for_table
 
 __all__ = [
     "AuditContextAdmin",
@@ -39,11 +40,12 @@ class AuditLogAdmin(admin.ModelAdmin):
 
     @admin.display(description="Linked Object")
     def linked_object(self, obj):
-        try:
-            target = obj.content_object
-        except Exception:
+        model_class = model_for_table(obj.table_name)
+        if model_class is None or not obj.object_id:
             return "-"
-        if target is None:
+        try:
+            target = model_class._default_manager.get(pk=obj.object_id)
+        except (model_class.DoesNotExist, ValueError, TypeError):
             return "-"
         get_url = getattr(target, "get_absolute_url", None)
         if callable(get_url):

@@ -116,7 +116,6 @@ CREATE TABLE IF NOT EXISTS {table_name} (
     id serial,
     operation text NOT NULL,
     changed_at timestamp with time zone NOT NULL DEFAULT now(),
-    content_type_id integer,
     object_id text,
     table_name text NOT NULL,
     user_id integer,

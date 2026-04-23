@@ -1,7 +1,7 @@
 """Unit tests for AuditedModelMixin."""
 
 from datetime import UTC, datetime
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -164,3 +164,66 @@ class TestAuditStateAsOf:
         assert result[0].object_id == "1"
         assert result[0].data == {"id": 1, "name": "a"}
         assert result[0].at == at
+
+
+class TestObjectHistoryView:
+    """Regression for the 0.3.x ``content_type`` NULL bug.
+
+    The old view filtered ``AuditLog.objects`` on ``content_type`` — a
+    column the framework-agnostic trigger never populates — so every
+    admin history page rendered an empty table. The fix routes through
+    :meth:`AuditLogQuerySet.for_object`, which keys off ``table_name``
+    + ``object_id`` like the rest of the public API.
+    """
+
+    def _make_mixin(self, fake_obj):
+        from auditrum.integrations.django.mixins import AuditHistoryMixin
+
+        class FakeMeta:
+            db_table = "orders"
+            app_label = "shop"
+            model_name = "order"
+
+        mixin = AuditHistoryMixin()
+        mixin.model = MagicMock()
+        mixin.model._meta = FakeMeta
+        mixin.get_object = MagicMock(return_value=fake_obj)
+        mixin.admin_site = MagicMock()
+        mixin.admin_site.each_context.return_value = {}
+        return mixin
+
+    def test_filters_via_for_object(self):
+        fake_obj = MagicMock()
+        mixin = self._make_mixin(fake_obj)
+
+        with (
+            patch(
+                "auditrum.integrations.django.mixins.AuditLog.objects.for_object"
+            ) as mock_for_object,
+            patch(
+                "auditrum.integrations.django.mixins.render",
+                return_value="rendered",
+            ),
+        ):
+            # Paginator needs .count() and slicing — let the MagicMock
+            # chain through ``.order_by`` and then behave like a list.
+            mock_qs = MagicMock()
+            mock_qs.order_by.return_value = []
+            mock_for_object.return_value = mock_qs
+
+            request = MagicMock()
+            request.GET = {}
+            mixin.object_history_view(request, "42")
+
+        mock_for_object.assert_called_once_with(fake_obj)
+
+    def test_redirects_when_object_missing(self):
+        mixin = self._make_mixin(fake_obj=None)
+        mixin._get_obj_does_not_exist_redirect = MagicMock(return_value="redirect")
+
+        request = MagicMock()
+        request.GET = {}
+        result = mixin.object_history_view(request, "does-not-exist")
+
+        assert result == "redirect"
+        mixin._get_obj_does_not_exist_redirect.assert_called_once()
