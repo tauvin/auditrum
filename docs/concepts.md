@@ -221,6 +221,71 @@ For non-Django frameworks you can either:
   Note `is_local=false` here because you're setting the value for the
   whole session, not a single statement.
 
+## `auditlog.meta` vs `audit_context.metadata`
+
+Two JSON columns, two different granularities. Mixing them up is the
+single most common "wait, where did my data go?" moment for new users.
+
+| Column                     | Granularity     | Written by                         | Typical contents                                                |
+|----------------------------|-----------------|------------------------------------|-----------------------------------------------------------------|
+| `auditlog.meta`            | Per-event (one per row change) | Audit trigger itself        | Per-row static copies via `extra_meta_fields=(…)` (e.g. `tenant_id`, `workspace_id`). One value **per audit row**. |
+| `audit_context.metadata`   | Per-block (one per request / job / shell session) | `auditrum_context(**metadata)` / middleware / `@audit_task` | Dynamic request/job state — `user_id`, `source`, `url`, `request_id`, `change_reason`, OTel trace id, etc. **Shared** by every audit row that fires inside the block. |
+
+Concretely:
+
+```python
+@track(fields=["status"], extra_meta=["tenant_id"])
+class Order(models.Model):
+    tenant_id = models.IntegerField()
+    status = models.CharField(max_length=32)
+```
+
+```python
+with auditrum_context(source="http", user_id=42, request_id="req-abc"):
+    order = Order.objects.get(pk=1)
+    order.status = "paid"
+    order.save()
+```
+
+Produces one `auditlog` row:
+
+```jsonc
+{
+  "operation": "UPDATE",
+  "table_name": "myapp_order",
+  "diff":       { "status": { "old": "pending", "new": "paid" } },
+  // Per-row — copied from the row itself at INSERT/UPDATE time.
+  "meta":       { "tenant_id": 7 },
+  // FK into audit_context, shared with every other event from this request.
+  "context_id": "ab12-…",
+}
+```
+
+And one `audit_context` row, upserted lazily:
+
+```jsonc
+{
+  "id":       "ab12-…",
+  "metadata": { "source": "http", "user_id": 42, "request_id": "req-abc" }
+}
+```
+
+Rules of thumb:
+
+- **Per-row context that belongs to the *row itself*** (which tenant
+  owns it, which workspace it's in, which is its parent aggregate)
+  goes in `extra_meta_fields` → `auditlog.meta`.
+- **Per-request / per-job context that applies to a whole unit of
+  work** (who made the request, what triggered it, OTel trace id,
+  feature flags) goes in `auditrum_context(**kwargs)` →
+  `audit_context.metadata`.
+
+If you find yourself filtering by `auditlog.meta->>'user_id'` you
+almost certainly want `AuditLog.objects.for_user(user)` instead —
+`user_id` lives in the context metadata and is promoted into the
+typed `auditlog.user_id` column by the `_audit_current_user_id()`
+helper on every event.
+
 ## The `audit_context` table
 
 ```sql

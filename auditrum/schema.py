@@ -170,12 +170,30 @@ CREATE TABLE IF NOT EXISTS {table_name}_{suffix}
 
 
 def generate_jsonb_diff_function_sql() -> str:
+    """Emit the ``jsonb_diff`` helper used by UPDATE triggers.
+
+    Returns a JSONB object in **paired** form::
+
+        {
+          "field_a": {"old": "was", "new": "is"},
+          "field_b": {"old": 1,     "new": 2}
+        }
+
+    The 0.3 implementation emitted ``{field: new_value}`` — a shape
+    that forced every consumer to cross-reference ``old_data`` to show
+    an ``old → new`` diff. It also silently dropped rows that set a
+    field to NULL (the ``jsonb_strip_nulls`` wrapper in the trigger
+    removed them). The paired form fixes both issues at once.
+    """
     return """
 CREATE OR REPLACE FUNCTION jsonb_diff(old jsonb, new jsonb)
 RETURNS jsonb AS $$
 BEGIN
   RETURN (
-    SELECT jsonb_object_agg(key, value)
+    SELECT jsonb_object_agg(
+      key,
+      jsonb_build_object('old', old -> key, 'new', value)
+    )
     FROM jsonb_each(new)
     WHERE old -> key IS DISTINCT FROM value
   );

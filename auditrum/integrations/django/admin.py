@@ -1,4 +1,5 @@
 from django.contrib import admin
+from django.urls import reverse
 from django.utils.html import format_html
 
 from auditrum.integrations.django.models import AuditContext, AuditLog
@@ -12,14 +13,66 @@ __all__ = [
 
 @admin.register(AuditContext)
 class AuditContextAdmin(admin.ModelAdmin):
-    list_display = ("id", "created_at", "updated_at", "event_count")
-    readonly_fields = ("id", "metadata", "created_at", "updated_at")
+    list_display = (
+        "id",
+        "created_at",
+        "source",
+        "user_label",
+        "change_reason",
+        "event_count",
+    )
+    readonly_fields = (
+        "id",
+        "metadata",
+        "created_at",
+        "updated_at",
+        "events_link",
+    )
     ordering = ("-created_at",)
     search_fields = ("id",)
 
     @admin.display(description="Events")
     def event_count(self, obj):
         return obj.events.count()
+
+    @admin.display(description="Source")
+    def source(self, obj):
+        return (obj.metadata or {}).get("source") or "—"
+
+    @admin.display(description="User")
+    def user_label(self, obj):
+        # ``username`` is the human-readable label the middleware stamps
+        # when available; ``user_id`` is the typed integer — fall back
+        # to whichever is present so the admin row always renders
+        # something meaningful for event-by-user triage.
+        metadata = obj.metadata or {}
+        return (
+            metadata.get("username")
+            or metadata.get("user_id")
+            or "—"
+        )
+
+    @admin.display(description="Change Reason")
+    def change_reason(self, obj):
+        return (obj.metadata or {}).get("change_reason") or "—"
+
+    @admin.display(description="Events in this context")
+    def events_link(self, obj):
+        # Render a link to the pre-filtered AuditLog changelist rather
+        # than embedding an inline — bulk operations under a single
+        # context can produce thousands of rows, which the inline would
+        # try to load in one page and OOM the admin. The filtered
+        # changelist is paginated and cheap. The URL uses the FK
+        # field name (``context``), not the DB column, so Django's
+        # changelist maps it to ``filter(context=<uuid>)`` directly.
+        count = obj.events.count()
+        url = reverse("admin:auditrum_django_auditlog_changelist")
+        return format_html(
+            '<a href="{}?context={}">View {} events</a>',
+            url,
+            obj.id,
+            count,
+        )
 
 
 @admin.register(AuditLog)

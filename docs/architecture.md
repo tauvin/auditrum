@@ -97,13 +97,24 @@ no sort step is needed at query time.
 
 ### GIN on `diff`
 
-`diff` is the jsonb blob of changed columns. GIN lets you answer
-questions like "find every event where the `status` field went to
-`paid`":
+`diff` is the jsonb blob of changed columns. Each entry is **paired** —
+``{field: {"old": <before>, "new": <after>}}`` — so UI consumers can
+render a full ``old → new`` diff without cross-referencing
+``old_data``, and GIN containment queries can target either side:
 
 ```sql
-SELECT * FROM auditlog WHERE diff @> '{"status": "paid"}'::jsonb;
+-- events where status specifically moved to 'paid' (ignoring the old value)
+SELECT * FROM auditlog
+WHERE diff @> '{"status": {"new": "paid"}}'::jsonb;
+
+-- events where status was 'pending' before the change
+SELECT * FROM auditlog
+WHERE diff @> '{"status": {"old": "pending"}}'::jsonb;
 ```
+
+INSERT rows carry ``{"old": null, "new": <value>}`` per column;
+DELETE rows carry ``{"old": <value>, "new": null}``. One uniform
+shape across every operation — no special-casing in consumers.
 
 `meta` does **not** have a GIN index by default, because per-row
 extras are usually low-cardinality and seldom queried. Add one
@@ -129,12 +140,20 @@ BEGIN
     END LOOP;
 
     IF (TG_OP = 'UPDATE') THEN
-        diff = jsonb_strip_nulls(jsonb_diff(old_filtered, new_filtered));
+        -- jsonb_diff returns {field: {old, new}} for fields that changed
+        diff = jsonb_diff(old_filtered, new_filtered);
         IF diff IS NULL THEN RETURN NULL; END IF;
     ELSIF TG_OP = 'INSERT' THEN
-        diff = new_filtered;
+        -- wrap each column value as {old: null, new: value}
+        diff = (
+            SELECT jsonb_object_agg(k, jsonb_build_object('old', NULL, 'new', v))
+            FROM jsonb_each(new_filtered) AS t(k, v)
+        );
     ELSIF TG_OP = 'DELETE' THEN
-        diff = old_filtered;
+        diff = (
+            SELECT jsonb_object_agg(k, jsonb_build_object('old', v, 'new', NULL))
+            FROM jsonb_each(old_filtered) AS t(k, v)
+        );
     END IF;
 
     IF (TG_OP = 'DELETE') THEN
@@ -151,7 +170,7 @@ BEGIN
         _audit_current_user_id(),
         CASE WHEN TG_OP IN ('UPDATE', 'DELETE') THEN to_jsonb(OLD) ELSE NULL END,
         CASE WHEN TG_OP IN ('UPDATE', 'INSERT') THEN to_jsonb(NEW) ELSE NULL END,
-        CASE WHEN TG_OP = 'UPDATE' THEN diff ELSE NULL END,
+        diff,      -- paired shape, written for every operation
         _audit_attach_context(),
         NULL
     );

@@ -14,17 +14,27 @@ BEGIN
     END LOOP;
 
     IF (TG_OP = 'UPDATE') THEN
-        diff = jsonb_strip_nulls(jsonb_diff(old_filtered, new_filtered));
+        diff = jsonb_diff(old_filtered, new_filtered);
         IF diff is null THEN
             RETURN NULL;
         END IF;
     ELSIF TG_OP = 'INSERT' THEN
-        diff = new_filtered;
+        diff = (
+            SELECT jsonb_object_agg(
+                k, jsonb_build_object('old', NULL, 'new', v)
+            )
+            FROM jsonb_each(new_filtered) AS t(k, v)
+        );
         IF diff is null THEN
             RETURN NULL;
         END IF;
     ELSIF TG_OP = 'DELETE' THEN
-        diff = old_filtered;
+        diff = (
+            SELECT jsonb_object_agg(
+                k, jsonb_build_object('old', v, 'new', NULL)
+            )
+            FROM jsonb_each(old_filtered) AS t(k, v)
+        );
         IF diff is null THEN
             RETURN NULL;
         END IF;
@@ -50,7 +60,7 @@ BEGIN
         _audit_current_user_id(),
         CASE WHEN TG_OP IN ('UPDATE', 'DELETE') THEN to_jsonb(OLD) ELSE NULL END,
         CASE WHEN TG_OP IN ('UPDATE', 'INSERT') THEN to_jsonb(NEW) ELSE NULL END,
-        CASE WHEN TG_OP = 'UPDATE' THEN diff ELSE NULL END,
+        diff,
         _audit_attach_context(),
         {meta_expr}
     );

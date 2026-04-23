@@ -37,14 +37,25 @@
             <tr>
                 <td>{{ log.changed_at }}</td>
                 <td>{{ log.operation }}</td>
-                <td>{{ log.user_id }}</td>
-                <td>{{ log.source }}</td>
-                <td>{{ log.change_reason|default:"–" }}</td>
+                <td>{{ log.user_id|default:"–" }}</td>
+                <td>{{ log.context.metadata.source|default:"–" }}</td>
+                <td>{{ log.context.metadata.change_reason|default:"–" }}</td>
                 <td>
+                    {% if log.diff %}
                     <details>
                         <summary>View</summary>
-                        <pre style="white-space: pre-wrap;">{{ log.diff|default:"–" }}</pre>
+                        <ul style="margin: 0; padding-left: 1.2em; list-style: disc;">
+                        {% for field, change in log.diff.items %}
+                            <li>
+                                <code>{{ field }}</code>:
+                                <del style="color: #a33; text-decoration: line-through;">{{ change.old|default:"∅" }}</del>
+                                <span style="color: #999;">→</span>
+                                <ins style="color: #273; text-decoration: none; font-weight: 600;">{{ change.new|default:"∅" }}</ins>
+                            </li>
+                        {% endfor %}
+                        </ul>
                     </details>
+                    {% else %}–{% endif %}
                 </td>
             </tr>
         {% empty %}

@@ -281,6 +281,78 @@ class OrderAdmin(AuditHistoryMixin, admin.ModelAdmin):
 `admin:myapp_order_audit_history` showing the full audit timeline for
 that row with paginated diffs.
 
+## Background tasks (Celery / RQ / Dramatiq)
+
+`AuditrumMiddleware` covers HTTP only. Background jobs need their own
+entry point. Two options — pick one per project, not both.
+
+### Option A — decorate each task
+
+```python
+# myapp/tasks.py
+from celery import shared_task
+from auditrum.integrations.django.tasks import audit_task
+
+
+@shared_task
+@audit_task(source="celery", queue="emails")
+def send_reminder(order_id):
+    Order.objects.filter(id=order_id).update(reminder_sent=True)
+```
+
+`@audit_task` sits **inside** the task runner's own decorator (closer
+to the function). On the worker it enters `auditrum_context(...)` for
+the duration of the call so every tracked query fires with real
+metadata. Works with any runner that invokes the decorated callable
+directly — Celery, RQ, Dramatiq, APScheduler.
+
+`async def` targets work the same way — the decorator auto-detects
+coroutine functions and returns an `async`-aware wrapper that keeps
+the context open across every `await`.
+
+### Option B — one-shot signal wiring (Celery only)
+
+```python
+# celery_config.py
+from celery import Celery
+from auditrum.integrations.django.tasks import install_celery_signals
+
+app = Celery("myapp")
+install_celery_signals()         # wraps every task globally
+```
+
+Hooks `task_prerun` / `task_postrun` so every Celery task runs inside
+`auditrum_context(source="celery", task_name=..., task_id=...)`.
+Call it once at startup; calling it multiple times registers the
+handlers multiple times.
+
+Under the hood both options produce identical audit rows — one
+`audit_context` row per task execution, linked to every audit event
+the task emitted.
+
+## Async views and decorators
+
+The `@with_context` and `@with_change_reason` decorators (and
+`@audit_task`) auto-detect `async def` targets via
+`asyncio.iscoroutinefunction`. A naive sync wrapper would close
+the context **before** the coroutine is awaited, silently dropping
+all metadata from the events the task writes. The async wrappers
+keep the `auditrum_context` / `use_change_reason` block open across
+every `await`:
+
+```python
+from auditrum.context import with_change_reason
+
+@with_change_reason("nightly sync")
+async def backfill():
+    async for order in Order.objects.afilter(status="draft"):
+        await order.asave()   # context survives the await
+```
+
+No code change needed on upgrade — the decorator figures out the
+right wrapper based on the target. Sync code still gets the sync
+wrapper so there's no loss of ergonomics for non-async callsites.
+
 ## Tips and gotchas
 
 - **Tracked models must have a `pk`.** Composite primary keys are not

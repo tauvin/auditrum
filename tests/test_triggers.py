@@ -121,3 +121,24 @@ class TestGenerateTriggerSql:
         """
         sql = generate_trigger_sql("users")
         assert "content_type_id" not in sql
+
+    def test_insert_delete_paired_diff_shape(self):
+        """INSERT/DELETE branches wrap column values in ``{old, new}`` so
+        every operation produces the same paired diff shape. The 0.3.x
+        trigger left ``diff = new_filtered`` / ``old_filtered`` raw,
+        which meant INSERT and DELETE rows needed special-casing in
+        every consumer."""
+        sql = generate_trigger_sql("users")
+        # INSERT branch: new value paired with null old
+        assert "jsonb_build_object('old', NULL, 'new', v)" in sql
+        # DELETE branch: old value paired with null new
+        assert "jsonb_build_object('old', v, 'new', NULL)" in sql
+
+    def test_no_jsonb_strip_nulls_on_update(self):
+        """The 0.3.x UPDATE path wrapped ``jsonb_diff`` in
+        ``jsonb_strip_nulls``, which silently dropped UPDATE events
+        that set a column to NULL. Paired format makes the wrapper
+        unnecessary — the outer value is always an object — so we
+        remove it to stop losing that signal."""
+        sql = generate_trigger_sql("users")
+        assert "jsonb_strip_nulls" not in sql

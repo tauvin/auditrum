@@ -1,3 +1,4 @@
+import asyncio
 import re
 from collections.abc import Callable
 from contextlib import contextmanager
@@ -179,7 +180,25 @@ audit_context = AuditContext()
 
 
 def with_context(**kwargs):
+    """Decorator that wraps the call in an :meth:`AuditContext.use` block.
+
+    Detects ``async def`` targets via :func:`asyncio.iscoroutinefunction`
+    and returns an ``async`` wrapper in that case — a plain ``def``
+    wrapper would close the context *before* the coroutine is awaited,
+    silently dropping the metadata from every audit event emitted by
+    the task.
+    """
+
     def decorator(func: Callable):
+        if asyncio.iscoroutinefunction(func):
+
+            @wraps(func)
+            async def awrapper(*args, **fkwargs):
+                with audit_context.use(**kwargs):
+                    return await func(*args, **fkwargs)
+
+            return awrapper
+
         @wraps(func)
         def wrapper(*args, **fkwargs):
             with audit_context.use(**kwargs):
@@ -191,7 +210,22 @@ def with_context(**kwargs):
 
 
 def with_change_reason(reason: str):
+    """Decorator that stamps a ``change_reason`` onto every audit event.
+
+    Mirrors :func:`with_context`'s coroutine handling so the reason is
+    not lost across an ``await`` boundary.
+    """
+
     def decorator(func: Callable):
+        if asyncio.iscoroutinefunction(func):
+
+            @wraps(func)
+            async def awrapper(*args, **kwargs):
+                with audit_context.use_change_reason(reason):
+                    return await func(*args, **kwargs)
+
+            return awrapper
+
         @wraps(func)
         def wrapper(*args, **kwargs):
             with audit_context.use_change_reason(reason):

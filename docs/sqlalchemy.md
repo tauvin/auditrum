@@ -327,8 +327,9 @@ def pay(id: int):
 ```
 
 Every `POST /orders/.../pay` now produces one row in `auditlog` with
-the diff `{"status": "paid"}` and one row in `audit_context` with the
-URL, user id, and the auto-generated request UUID.
+the diff `{"status": {"old": "pending", "new": "paid"}}` and one row
+in `audit_context` with the URL, user id, and the auto-generated
+request UUID.
 
 ## What's next
 

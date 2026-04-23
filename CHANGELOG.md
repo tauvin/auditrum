@@ -35,6 +35,24 @@ at runtime.
 
 ### Added
 
+- **Background-task context helpers.** New
+  ``auditrum.integrations.django.tasks`` module with a per-task
+  ``@audit_task(source="celery", **metadata)`` decorator and a
+  one-shot ``install_celery_signals()`` helper that wires
+  ``task_prerun`` / ``task_postrun`` to auto-wrap every Celery task
+  in ``auditrum_context``. Middleware still covers HTTP only — this
+  closes the ~80% of background-job cases that were hand-written
+  ``with auditrum_context(...)`` blocks before. Works with Celery,
+  RQ, Dramatiq, APScheduler — anything that invokes the decorated
+  callable on the worker.
+- **``@with_context`` / ``@with_change_reason`` are now async-aware.**
+  Both decorators (and ``@audit_task``) detect ``async def`` targets
+  via :func:`asyncio.iscoroutinefunction` and return an ``async``
+  wrapper that keeps the context open across every ``await`` inside
+  the task. The 0.3 sync wrappers closed the block *before* the
+  coroutine was awaited, silently dropping metadata from every
+  audit event emitted by the task body. Sync callsites behave
+  exactly as before.
 - **Strict static typing gate.** ``ty`` (Astral, pinned to ``0.0.31``)
   checks ``auditrum/`` core and ``auditrum/integrations/django/`` on
   every push and PR. Config lives in ``ty.toml`` for now; it moves into
@@ -106,6 +124,75 @@ at runtime.
 
 ### Changed
 
+- **Breaking: ``auditlog.diff`` now stores a paired
+  ``{field: {"old": <before>, "new": <after>}}`` shape for every
+  operation.** The 0.3 shape was ``{field: new_value}`` on UPDATE,
+  ``new_row`` on INSERT, ``old_row`` on DELETE — three different
+  formats that forced every UI consumer to cross-reference
+  ``old_data`` and special-case per-operation rendering. The new
+  shape is self-sufficient: one iteration over ``log.diff.items()``
+  renders a ``old → new`` timeline for any event. INSERT rows carry
+  ``{"old": null, "new": value}`` per column; DELETE rows carry
+  ``{"old": value, "new": null}``. The trigger now also writes
+  ``diff`` for **every** operation (0.3 skipped it for INSERT/DELETE).
+
+  **Upgrade path for existing data.** New rows use the new shape
+  automatically after re-running ``auditrum_makemigrations`` +
+  ``migrate`` (the trigger body is part of each tracked app's
+  migration graph and drift-detected by ``TriggerManager``). Existing
+  rows written under 0.3 stay in the old format unless you back-fill
+  them. A one-off SQL script does the conversion:
+
+  ```sql
+  -- UPDATE rows: {field: new_val} → {field: {old: old_val, new: new_val}}
+  UPDATE auditlog
+  SET diff = (
+      SELECT jsonb_object_agg(
+          d.key,
+          jsonb_build_object('old', old_data -> d.key, 'new', d.value)
+      )
+      FROM jsonb_each(diff) d
+  )
+  WHERE operation = 'UPDATE'
+    AND diff IS NOT NULL
+    AND NOT EXISTS (
+        SELECT 1 FROM jsonb_each(diff) d
+        WHERE jsonb_typeof(d.value) = 'object'
+          AND d.value ? 'old' AND d.value ? 'new'
+    );
+
+  -- INSERT rows: historically had diff = NULL → rebuild from new_data
+  UPDATE auditlog
+  SET diff = (
+      SELECT jsonb_object_agg(
+          d.key,
+          jsonb_build_object('old', NULL, 'new', d.value)
+      )
+      FROM jsonb_each(new_data) d
+  )
+  WHERE operation = 'INSERT'
+    AND diff IS NULL
+    AND new_data IS NOT NULL;
+
+  -- DELETE rows: same story from old_data
+  UPDATE auditlog
+  SET diff = (
+      SELECT jsonb_object_agg(
+          d.key,
+          jsonb_build_object('old', d.value, 'new', NULL)
+      )
+      FROM jsonb_each(old_data) d
+  )
+  WHERE operation = 'DELETE'
+    AND diff IS NULL
+    AND old_data IS NOT NULL;
+  ```
+
+  Run in a transaction on a quiet window; the UPDATE branch's guard
+  clause (`NOT EXISTS … 'old' AND 'new'`) keeps the script idempotent
+  so a partial run can be retried safely. For a GIN index on ``diff``,
+  the queries fall back to a sequential scan regardless — partition
+  by ``changed_at`` range if the table is large.
 - **Error messages in the public API now include remediation hints**,
   not just "what's wrong". Auditing each ``raise ValueError`` /
   ``raise RuntimeError`` site produced five upgrades:
@@ -179,6 +266,54 @@ at runtime.
   resolves the model class from ``log.table_name`` for the same
   reason — the 0.3 implementation read ``log.content_type`` and
   always returned the em-dash fallback.
+- **Admin history template** no longer renders permanently-empty
+  ``Source`` and ``Reason`` columns. ``object_history.html`` read
+  ``{{ log.source }}`` and ``{{ log.change_reason }}`` — neither
+  field exists on :class:`AuditLog` (both live under
+  ``audit_context.metadata``), so both columns were silently blank
+  for every row. The template now reads through
+  ``log.context.metadata.source`` and
+  ``log.context.metadata.change_reason`` with an em-dash default so
+  events without an attached context render cleanly too. Same bug
+  class as the content_type fix above — both caught by the new
+  ``tests/integration/test_django_history_pg.py`` regression suite.
+- **UPDATEs that set a column to ``NULL`` are no longer silently
+  dropped from ``auditlog.diff``.** The 0.3 trigger wrapped the
+  diff in ``jsonb_strip_nulls``, which removed entries with null
+  values — so ``UPDATE orders SET reviewed_at = NULL WHERE id = 1``
+  produced an audit row whose ``diff`` was an empty object. The
+  paired shape makes the wrapper obsolete (the outer value is
+  always a ``{"old", "new"}`` object, never null) so we removed it.
+  Null-target UPDATE events now appear in ``diff`` as
+  ``{field: {"old": <prev>, "new": null}}``. The ``test_update_to_null_value_is_not_dropped``
+  integration test locks the behaviour in.
+- **Admin ``AuditContextAdmin`` surfaces events and metadata
+  directly.** The list view now shows ``source``, ``user``, and
+  ``change_reason`` pulled from ``AuditContext.metadata`` as
+  top-level columns — no more clicking into every row to see which
+  request produced what. The detail view gains a read-only
+  ``Events in this context`` link that opens the pre-filtered
+  ``AuditLog`` changelist (``?context=<uuid>``); a full inline
+  would OOM the page under bulk operations that fan out to thousands
+  of events per context, so we route through the paginated
+  changelist instead.
+- **Admin history template renders a real ``old → new`` diff.** The
+  default ``object_history.html`` now iterates ``log.diff.items``
+  with the paired shape — ``<del>{{ change.old }}</del> →
+  <ins>{{ change.new }}</ins>`` — and escapes to an ``∅`` glyph when
+  a side is null (INSERT / DELETE boundaries). The 0.3 template
+  rendered the raw ``{{ log.diff }}`` blob in a ``<pre>`` tag, which
+  required every project to ship a ``get_item`` template filter just
+  to cross-reference ``old_data``.
+- **End-to-end admin-history regression test.** New
+  ``tests/integration/test_django_history_pg.py`` installs a real
+  trigger via ``TriggerManager``, mutates a row, and asserts
+  :meth:`AuditLogQuerySet.for_object` returns the events — a path
+  neither ``test_mixins.py`` (pure ORM) nor ``test_trigger_roundtrip.py``
+  (pure SQL) covered. Closes the coverage gap that let the
+  content_type bug ship in 0.3. Also asserts
+  ``log.context.metadata`` is populated end-to-end, locking in the
+  template fix.
 
 ## [0.3.1] — 2026-04-14
 

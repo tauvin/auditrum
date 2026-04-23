@@ -216,3 +216,15 @@ class TestJsonbDiffFunction:
         sql = generate_jsonb_diff_function_sql()
         assert "CREATE OR REPLACE FUNCTION jsonb_diff" in sql
         assert "LANGUAGE plpgsql" in sql
+
+    def test_emits_paired_format(self):
+        """Regression: the diff output is paired ``{old, new}``, not
+        values-only. The 0.3.x shape forced every UI consumer to
+        cross-reference ``old_data`` and dropped null-value updates
+        through ``jsonb_strip_nulls``. Paired form is self-sufficient.
+        """
+        sql = generate_jsonb_diff_function_sql()
+        assert "jsonb_build_object('old', old -> key, 'new', value)" in sql
+        # Values-only shape must not reappear — guard against future
+        # accidental regressions to the pre-0.4 format.
+        assert "jsonb_object_agg(key, value)" not in sql

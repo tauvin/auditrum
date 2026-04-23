@@ -34,7 +34,10 @@ class TestTriggerRoundtrip:
         assert rows[0][0] == "INSERT"
         assert rows[0][1] == "users"
 
-    def test_update_creates_diff(self, sample_table):
+    def test_update_creates_paired_diff(self, sample_table):
+        """UPDATE diff is in paired ``{field: {old, new}}`` form — the
+        self-sufficient shape a UI can render without cross-referencing
+        ``old_data``."""
         conn = sample_table
         with conn.cursor() as cur:
             cur.execute(generate_trigger_sql("users"))
@@ -43,7 +46,43 @@ class TestTriggerRoundtrip:
             cur.execute("SELECT operation, diff FROM auditlog WHERE operation = 'UPDATE'")
             rows = cur.fetchall()
         assert len(rows) == 1
-        assert rows[0][1] == {"email": "new@x.com"}
+        assert rows[0][1] == {"email": {"old": "a@x.com", "new": "new@x.com"}}
+
+    def test_insert_diff_uses_paired_shape(self, sample_table):
+        conn = sample_table
+        with conn.cursor() as cur:
+            cur.execute(generate_trigger_sql("users"))
+            cur.execute("INSERT INTO users (name, email) VALUES ('zoe', 'z@x.com')")
+            cur.execute("SELECT diff FROM auditlog WHERE operation = 'INSERT'")
+            (diff,) = cur.fetchone()
+        assert diff["name"] == {"old": None, "new": "zoe"}
+        assert diff["email"] == {"old": None, "new": "z@x.com"}
+
+    def test_delete_diff_uses_paired_shape(self, sample_table):
+        conn = sample_table
+        with conn.cursor() as cur:
+            cur.execute(generate_trigger_sql("users"))
+            cur.execute("INSERT INTO users (name, email) VALUES ('y', 'y@x.com')")
+            cur.execute("DELETE FROM users WHERE name = 'y'")
+            cur.execute("SELECT diff FROM auditlog WHERE operation = 'DELETE'")
+            (diff,) = cur.fetchone()
+        assert diff["name"] == {"old": "y", "new": None}
+        assert diff["email"] == {"old": "y@x.com", "new": None}
+
+    def test_update_to_null_value_is_not_dropped(self, sample_table):
+        """Regression: the 0.3.x trigger ran ``jsonb_strip_nulls`` over
+        the diff, which silently dropped UPDATEs that set a column to
+        NULL. Paired format makes the wrapper obsolete — a null ``new``
+        is now a real, queryable value."""
+        conn = sample_table
+        with conn.cursor() as cur:
+            cur.execute(generate_trigger_sql("users"))
+            cur.execute("INSERT INTO users (name, email) VALUES ('n', 'e@x.com')")
+            cur.execute("UPDATE users SET email = NULL WHERE name = 'n'")
+            cur.execute("SELECT diff FROM auditlog WHERE operation = 'UPDATE'")
+            rows = cur.fetchall()
+        assert len(rows) == 1
+        assert rows[0][0] == {"email": {"old": "e@x.com", "new": None}}
 
     def test_delete_captures_old_data(self, sample_table):
         conn = sample_table
@@ -68,7 +107,7 @@ class TestTriggerRoundtrip:
             cur.execute("SELECT diff FROM auditlog WHERE operation = 'UPDATE'")
             diff = cur.fetchone()[0]
         assert "password" not in diff
-        assert diff.get("email") == "c2@x.com"
+        assert diff["email"] == {"old": "c@x.com", "new": "c2@x.com"}
 
     def test_track_only_ignores_other_fields(self, sample_table):
         conn = sample_table
