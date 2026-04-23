@@ -332,6 +332,42 @@ at runtime.
   ``audit_context``. Lived in ``auditrum/integrations/django/admin.py``
   since 0.3; the content_type bug masked earlier failures by
   returning an empty changelist before the search filter ran.
+- **``Model.objects.create`` no longer returns a UUID as the pk.**
+  Reported by the eridan-catalog team on 0.4.2 after integrating
+  the async-ORM fix below. The context-propagation wrapper prepends
+  ``SELECT set_config(...);`` to every user statement — turning a
+  single ``INSERT … RETURNING id`` into a two-statement submission.
+  psycopg3 leaves the cursor on the *first* result set after
+  ``execute``, which is the ``SELECT set_config`` row. That row's
+  first column is the context UUID (``set_config`` returns the
+  value it was set to), so Django's ORM ``cursor.fetchone()``
+  picks up the UUID string and assigns it to ``instance.pk`` —
+  breaking every downstream ``.save()``, FK-assignment, and
+  ``filter(pk=…)`` call, because ``int('d93aa383-…')`` raises
+  ``ValueError``. The database row itself was correct (bigint
+  ``id`` populated by the serial sequence); only the in-memory
+  ``pk`` was corrupt.
+
+  The bug existed latently since the injection pattern was
+  introduced, but was masked in pre-0.4.2 releases by the old
+  wrapper-registration shape: async ORM went through an unwrapped
+  connection (the original async-ORM bug), and sync code paths
+  that happened to read ``cursor.rowcount`` or ``.lastrowid``
+  instead of ``fetchone()`` escaped the issue. The 0.4.2
+  connection-wide signal-based registration put the wrapper on
+  *every* connection, so every ``create()`` now goes through it —
+  and the latent bug surfaced on the primary ORM code path.
+
+  The fix is a single ``cursor.nextset()`` call inside
+  ``_inject_audit_context`` after the user statement executes.
+  That advances the cursor past the ``set_config`` result onto
+  the user query's result set, so ``fetchone()`` /
+  ``fetchall()`` / ``rowcount`` all see exactly what they would
+  without the wrapper. Regression tests in
+  ``tests/integration/test_django_history_pg.py``
+  (``test_insert_returning_inside_context_returns_real_id`` and
+  ``test_django_orm_create_inside_context_has_int_pk``) drive the
+  raw-cursor and ORM code paths against a real Postgres.
 - **Async Django ORM writes now get the right ``context_id``.**
   Pre-fix, ``auditrum_context`` registered its execute wrapper by
   calling ``connection.execute_wrapper(...)`` — where ``connection``

@@ -380,23 +380,25 @@ No code change required on upgrade — the old `with auditrum_context(...)`
 / `@auditrum_context` call sites work unchanged; they just now
 also cover `acreate` / `asave` / `afilter` ORM calls correctly.
 
-**A caveat for raw-cursor users.** If your code does
-`connection.cursor().execute("INSERT ... RETURNING id")` inside
-`auditrum_context`, the wrapper prepends a `SELECT set_config(...);`
-to the statement, which turns your single-result query into a
-multi-statement submission. psycopg3 exposes each result set
-separately — call `cursor.nextset()` before `fetchone()` to pull
-the RETURNING row:
+The wrapper also advances `cursor.nextset()` after every
+injected statement, so both raw-cursor users and the Django ORM
+see the *user* query's result set — not the injected
+`SELECT set_config(...)` result — when they call
+`fetchone()` / `fetchall()` / read `cursor.rowcount`.
+`INSERT … RETURNING id` inside `auditrum_context` returns the
+real bigint id:
 
 ```python
-with django.db.connection.cursor() as cur:
-    cur.execute("INSERT INTO t (x) VALUES (%s) RETURNING id", (42,))
-    cur.nextset()       # step past the set_config result
-    (row_id,) = cur.fetchone()
+with auditrum_context(source="script"):
+    with django.db.connection.cursor() as cur:
+        cur.execute("INSERT INTO t (x) VALUES (%s) RETURNING id", (42,))
+        (row_id,) = cur.fetchone()   # real id, not the context UUID
 ```
 
-The Django ORM handles this internally — the caveat only affects
-code that drives the cursor by hand.
+Earlier 0.4 releases left this up to the caller and a few
+downstream teams hit pks set to the context UUID string (see
+CHANGELOG entry on the eridan-catalog report) — that's fixed
+transparently from 0.4.3 onward.
 
 ## Tips and gotchas
 

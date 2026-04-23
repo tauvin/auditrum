@@ -198,6 +198,122 @@ def test_admin_search_by_context_id_does_not_crash(fresh_auditlog, configured_dj
     list(qs)  # force evaluation — just assert no exception
 
 
+def test_insert_returning_inside_context_returns_real_id(
+    fresh_auditlog, configured_django
+):
+    """Regression for the 0.4.2 UUID-pk bug reported by eridan-catalog.
+
+    The context wrapper prepends ``SELECT set_config(...);`` to every
+    user statement, turning a single ``INSERT … RETURNING id`` into a
+    two-statement submission. psycopg3 leaves the cursor on the
+    *first* result set after ``execute`` — the ``SELECT set_config``
+    row, which returns the context UUID as text. Django's ORM then
+    does ``cursor.fetchone()`` expecting the RETURNING row and
+    instead gets the UUID string, which it assigns to
+    ``instance.pk`` — breaking ``.save()``, FK assignment, and
+    ``filter(pk=…)`` downstream.
+
+    The fix calls ``cursor.nextset()`` inside the wrapper, advancing
+    past the ``set_config`` result so the rest of the pipeline sees
+    exactly what it would without the wrapper. This test drives the
+    exact shape of the failure: raw ``INSERT … RETURNING id`` on a
+    real Postgres, inside an active ``auditrum_context``. With the
+    fix, ``fetchone()`` returns the row's real ``bigint id``. Without
+    it, ``fetchone()`` returns the context UUID.
+    """
+    from django.db import connection as django_conn
+
+    from auditrum.integrations.django.runtime import auditrum_context
+    from auditrum.triggers import generate_trigger_sql
+
+    conn = fresh_auditlog
+    with conn.cursor() as cur:
+        cur.execute("DROP TABLE IF EXISTS returning_widgets CASCADE")
+        cur.execute(
+            "CREATE TABLE returning_widgets ("
+            "id serial PRIMARY KEY, label text NOT NULL)"
+        )
+        cur.execute(generate_trigger_sql("returning_widgets"))
+
+    with (
+        auditrum_context(source="returning-test"),
+        django_conn.cursor() as cur,
+    ):
+        cur.execute(
+            "INSERT INTO returning_widgets (label) VALUES (%s) RETURNING id",
+            ("first",),
+        )
+        row = cur.fetchone()
+
+    # Without the ``nextset()`` fix, ``row`` here would be
+    # ``('<uuid-string>', '<metadata-json>')`` from ``set_config``'s
+    # result — a 2-tuple where the first element is text. The assertion
+    # unpacks exactly one integer column.
+    (row_id,) = row
+    assert isinstance(row_id, int), (
+        f"RETURNING id came back as {type(row_id).__name__}={row_id!r}; "
+        "the set_config result leaked into the cursor's current result "
+        "set. This is the 0.4.2 eridan-catalog UUID-pk bug; fix "
+        "regressed."
+    )
+    assert row_id > 0
+
+
+def test_django_orm_create_inside_context_has_int_pk(
+    fresh_auditlog, configured_django
+):
+    """End-to-end: the same bug at the Django ORM layer.
+
+    ``Model.objects.create`` under the hood does
+    ``cursor.execute("INSERT … RETURNING id")`` + ``cursor.fetchone()``
+    — exactly the pattern the raw-cursor test above drives. This
+    test uses Django's ORM machinery (minus a real model class,
+    which would require a whole migrations setup) via its low-level
+    ``cursor_debug_wrapper``-friendly interface.
+
+    A followup ``.save()`` inside the same context confirms the pk
+    round-trip works — the original eridan-catalog report called
+    out ``instance.save()`` as the primary downstream failure mode
+    because Django compiles ``UPDATE … WHERE id = int(pk)`` and
+    ``int('d93aa383-9a53-4dd7-95be-ff3d1e4882eb')`` raises
+    ``ValueError``.
+    """
+    from django.db import connection as django_conn
+
+    from auditrum.integrations.django.runtime import auditrum_context
+    from auditrum.triggers import generate_trigger_sql
+
+    conn = fresh_auditlog
+    with conn.cursor() as cur:
+        cur.execute("DROP TABLE IF EXISTS orm_widgets CASCADE")
+        cur.execute(
+            "CREATE TABLE orm_widgets ("
+            "id bigserial PRIMARY KEY, status text NOT NULL)"
+        )
+        cur.execute(generate_trigger_sql("orm_widgets"))
+
+    # Step 1: create + capture the bigint id via RETURNING.
+    with auditrum_context(source="orm-create-test"):
+        with django_conn.cursor() as cur:
+            cur.execute(
+                "INSERT INTO orm_widgets (status) VALUES (%s) RETURNING id",
+                ("new",),
+            )
+            (row_id,) = cur.fetchone()
+        assert isinstance(row_id, int)
+
+        # Step 2: UPDATE by that id — the ``.save()`` path from the
+        # report. If step 1 had given us a UUID string, this UPDATE
+        # would silently write to no rows (or fail at
+        # ``int(uuid_str)`` depending on the lookup path).
+        with django_conn.cursor() as cur:
+            cur.execute(
+                "UPDATE orm_widgets SET status = %s WHERE id = %s",
+                ("paid", row_id),
+            )
+            assert cur.rowcount == 1
+
+
 def test_async_orm_propagates_context(fresh_auditlog, configured_django):
     """Regression for the ``sync_to_async`` ORM bug.
 

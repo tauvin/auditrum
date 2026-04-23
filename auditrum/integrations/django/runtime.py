@@ -208,7 +208,37 @@ def _inject_audit_context(execute, sql, params, many, context):
     if is_bytes:
         new_sql = new_sql.encode()
 
-    return execute(new_sql, new_params, many, context)
+    result = execute(new_sql, new_params, many, context)
+
+    # The injection turns a single user statement into a two-statement
+    # submission. psycopg3 leaves the cursor positioned on the FIRST
+    # result set after ``execute`` — the ``SELECT set_config(...)``
+    # row — so any downstream ``cursor.fetchone()`` /
+    # ``cursor.fetchall()`` call by Django's ORM reads the GUC values
+    # instead of the user query's rows. For ``INSERT … RETURNING id``
+    # this means ``instance.pk`` ends up set to the context UUID
+    # string rather than the ``bigint`` the database actually
+    # generated — breaking ``.save()``, FK assignment, and every
+    # ``filter(pk=…)`` lookup downstream (eridan-catalog team hit
+    # this in four separate code paths on 0.4.2).
+    #
+    # Advancing to the next result set via ``nextset()`` before
+    # returning moves the cursor to the user's query results, so the
+    # rest of Django's pipeline sees exactly what it would without
+    # the wrapper. ``nextset()`` is a DB-API 2.0 method; psycopg3
+    # supports it, and it returns ``None`` (or ``False``) harmlessly
+    # for statements that produced only one result set (DDL, bare
+    # UPDATE/DELETE without RETURNING).
+    cursor = context.get("cursor")
+    if cursor is not None:
+        # Defensive: if a custom backend's cursor doesn't support
+        # ``nextset()``, fall through rather than crash. Better a
+        # cursor-state issue downstream than a hard failure here on
+        # every query.
+        with contextlib.suppress(Exception):
+            cursor.nextset()
+
+    return result
 
 
 class auditrum_context(contextlib.ContextDecorator):
