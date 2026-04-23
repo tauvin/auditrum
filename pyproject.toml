@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "auditrum"
-version = "0.4.1"
+version = "0.4.2"
 description = "Auditrum — a PostgreSQL audit system with rich contextual logging and Django integration"
 readme = "README.md"
 authors = [
@@ -60,6 +60,15 @@ test = [
     "hypothesis>=6.100",
     "pglast>=6.0",
 ]
+benchmark = [
+    "pytest-benchmark>=4.0",
+    "testcontainers[postgres]>=4.0",
+    "psycopg[binary]>=3.1",
+]
+docs = [
+    "mkdocs-material>=9.5",
+    "mkdocstrings[python]>=0.24",
+]
 typecheck = [
     "ty==0.0.31",
     "django-stubs>=5.0,<6",
@@ -75,6 +84,9 @@ auditrum = "auditrum.cli:app"
 
 [tool.setuptools.packages.find]
 include = ["auditrum*"]
+# Benchmark + test code stays out of the wheel. Users who run the
+# benchmarks work from a checkout, not a pip install.
+exclude = ["benchmarks*", "tests*"]
 
 [tool.setuptools.package-data]
 auditrum = ["**/*.html", "**/*.txt", "**/*.sql"]

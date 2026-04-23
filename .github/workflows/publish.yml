@@ -15,7 +15,7 @@ on:
 
 permissions:
   contents: write   # needed for creating GitHub releases
-  id-token: write   # reserved for future migration to PyPI Trusted Publishing
+  id-token: write   # required for PyPI Trusted Publishing (OIDC)
 
 jobs:
   # ---------------------------------------------------------------------
@@ -60,6 +60,15 @@ jobs:
     name: Build and publish to PyPI
     needs: test
     runs-on: ubuntu-latest
+    # ``environment:`` ties the OIDC identity claim to a specific PyPI
+    # Trusted Publisher configuration on the pypi.org side. The PyPI
+    # project settings must match (workflow=publish.yml,
+    # environment=pypi-publish). Without this block
+    # ``pypa/gh-action-pypi-publish`` receives a token that doesn't
+    # match any registered trusted publisher and the upload fails.
+    environment:
+      name: pypi-publish
+      url: https://pypi.org/p/auditrum
     steps:
       - name: Checkout repository
         uses: actions/checkout@v5
@@ -102,8 +111,10 @@ jobs:
       - name: Build sdist + wheel
         run: python -m build
 
-      # Catches markdown rendering bugs in README before they end up
-      # on the public PyPI page where they're harder to fix.
+      # ``twine check`` catches markdown rendering bugs in README
+      # before they end up on the public PyPI page where they're harder
+      # to fix. The upload itself happens via OIDC Trusted Publishing
+      # below — twine is only used here for validation.
       - name: Validate built artifacts
         run: python -m twine check dist/*
 
@@ -127,11 +138,22 @@ jobs:
           fi
           printf '%s\n' "$SQL_FILES"
 
-      - name: Publish to PyPI
-        env:
-          TWINE_USERNAME: __token__
-          TWINE_PASSWORD: ${{ secrets.PYPI }}
-        run: twine upload dist/*
+      # Trusted Publishing via OIDC — no ``secrets.PYPI`` token in the
+      # repo, nothing to rotate, nothing to leak through a compromised
+      # contributor. The identity is bound to this repo + this workflow
+      # file + the ``pypi-publish`` environment declared on the job.
+      # One-time setup at
+      # https://pypi.org/manage/project/auditrum/settings/publishing/
+      # with: owner=tauvin, repo=auditrum, workflow=publish.yml,
+      # environment=pypi-publish.
+      - name: Publish to PyPI (Trusted Publishing, OIDC)
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          # Default ``packages-dir: dist/`` matches our build output.
+          # ``print-hash: true`` surfaces the uploaded-file SHA256 in
+          # the run log so the release can be cross-checked against
+          # what PyPI actually served.
+          print-hash: true
 
       # Hand the artifacts to the release job so it can attach them to
       # the GitHub release.

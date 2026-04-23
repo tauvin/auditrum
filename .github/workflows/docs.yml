@@ -1,0 +1,77 @@
+name: Docs
+
+# Builds and publishes the mkdocs-material site to GitHub Pages.
+# Runs on every push to main (so ``main`` is always the live docs)
+# and on pull requests as a build-only check (catches broken links
+# and missing cross-refs before they land on the public site).
+#
+# Publishing goes through the ``github-pages`` environment so the
+# OIDC token scope is narrowed to the Pages deployment action and
+# nothing else in the workflow can write to the ``gh-pages`` branch.
+#
+# All untrusted input stays in ``env:`` blocks (no user-controlled
+# data is interpolated into run: commands).
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: docs-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build site
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          version: latest
+          enable-cache: true
+          cache-suffix: docs
+
+      - name: Set up Python 3.13
+        run: uv python install 3.13
+
+      - name: Install docs dependencies
+        run: |
+          uv sync \
+            --extra django \
+            --extra sqlalchemy \
+            --extra observability \
+            --extra docs
+
+      - name: Build site
+        run: uv run --no-sync mkdocs build --clean
+
+      - name: Upload site artifact
+        if: github.event_name != 'pull_request'
+        uses: actions/upload-pages-artifact@v4
+        with:
+          path: site
+
+  deploy:
+    name: Deploy to GitHub Pages
+    needs: build
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

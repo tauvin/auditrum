@@ -35,6 +35,16 @@ at runtime.
 
 ### Added
 
+- **``auditrum_refresh_schema`` management command.** Safety
+  valve for refreshing the PL/pgSQL helper bodies (``jsonb_diff``,
+  ``_audit_attach_context``, ``_audit_current_user_id``, the
+  ``_audit_reconstruct_*`` pair) against the currently-installed
+  Python release. Idempotent — each helper is emitted as
+  ``CREATE OR REPLACE FUNCTION`` so running repeatedly just
+  overwrites with the current body. Supports ``--dry-run`` for
+  auditing what would execute. Primarily exists so users who
+  deploy outside the migration graph (raw psycopg, SQLAlchemy,
+  emergency recovery) can self-heal after an upgrade.
 - **Background-task context helpers.** New
   ``auditrum.integrations.django.tasks`` module with a per-task
   ``@audit_task(source="celery", **metadata)`` decorator and a
@@ -305,6 +315,77 @@ at runtime.
   rendered the raw ``{{ log.diff }}`` blob in a ``<pre>`` tag, which
   required every project to ship a ``get_item`` template filter just
   to cross-reference ``old_data``.
+- **Admin search box no longer 500s.**
+  ``AuditLogAdmin.search_fields`` included the bare string
+  ``"context_id"`` — but that's only the ``db_column`` of the
+  ``context`` FK, not a concrete model field. Django's default
+  ``__icontains`` lookup raised ``FieldError: Unsupported lookup
+  'icontains' for ForeignKey or join on the field not permitted.``
+  the moment an operator typed anything into the search box. The
+  fix routes the lookup through ``context__id__exact`` — UUIDs are
+  unique identifiers, substring matching has no use, and ``exact``
+  avoids the ``UPPER(uuid::text)`` cast that ``iexact`` would need.
+  Django's ORM recognises that ``id`` is the PK of the referenced
+  model and the FK column already holds that value, so the compiled
+  SQL is a direct ``auditlog.context_id = <uuid>`` — it hits the
+  existing ``auditlog_context_id_idx`` btree without joining
+  ``audit_context``. Lived in ``auditrum/integrations/django/admin.py``
+  since 0.3; the content_type bug masked earlier failures by
+  returning an empty changelist before the search filter ran.
+- **Async Django ORM writes now get the right ``context_id``.**
+  Pre-fix, ``auditrum_context`` registered its execute wrapper by
+  calling ``connection.execute_wrapper(...)`` — where ``connection``
+  is a thread-local proxy resolving to the current thread's
+  ``DatabaseWrapper``. Django's async ORM dispatches SQL onto
+  thread-pool workers via ``sync_to_async``; each worker has its
+  own per-thread ``DatabaseWrapper`` that never saw the wrapper, so
+  ``await Model.objects.acreate(...)`` / ``asave`` /
+  ``afilter(...).aupdate`` silently wrote audit rows with
+  ``context_id = NULL`` despite the calling task's ContextVar
+  being propagated correctly by ``asgiref``. The attribution gap
+  was loudest in admin rendering where every async-origin event
+  showed a blank "Source" column, but also quietly broke any
+  query keyed on ``context_id`` downstream.
+
+  The wrapper is now registered once per ``DatabaseWrapper`` via
+  the ``django.db.backends.signals.connection_created`` signal,
+  plus a one-time walk of ``connections.all()`` in
+  ``PgAuditIntegrationConfig.ready`` to cover wrappers that
+  already exist when the app boots. The wrapper short-circuits
+  when ``_tracker.get() is None`` so permanent registration costs
+  one dict lookup per query outside an active context — nothing
+  measurable on a real workload. ``auditrum_context.__enter__`` no
+  longer needs the per-entry hook lifecycle; it only sets the
+  ContextVar now. New integration test
+  ``tests/integration/test_django_history_pg.py::test_async_orm_propagates_context``
+  drives a real ``sync_to_async(thread_sensitive=False)`` dispatch
+  and asserts ``log.context.metadata`` is populated from the
+  outer-thread context — the sync-only unit tests can't reproduce
+  the thread-pool path.
+- **Upgrading from 0.3.x no longer silently keeps the old
+  ``jsonb_diff`` body.** Schema helpers like ``jsonb_diff``,
+  ``_audit_attach_context``, ``_audit_current_user_id``, and the
+  ``_audit_reconstruct_*`` pair were emitted exactly once by
+  ``auditrum_django.0001_initial`` and never refreshed on upgrade.
+  Users who ``pip install -U auditrum && migrate`` ended up with
+  DB-side function bodies frozen at the 0.3 revision — new audit
+  rows were written in the pre-0.4 ``{field: new_value}`` diff
+  shape despite the library being on 0.4. Two mechanisms close
+  the gap: a new ``auditrum_django.0003_refresh_schema_04``
+  migration re-emits every version-dependent helper via
+  ``CREATE OR REPLACE FUNCTION`` on ``migrate``, and a new
+  ``auditrum_refresh_schema`` management command does the same
+  thing on demand as an ops escape hatch (also supports
+  ``--dry-run`` for review). Integration test
+  ``tests/integration/test_refresh_schema_pg.py`` replaces a live
+  ``jsonb_diff`` with the 0.3 body, runs both the migration and
+  the command, and asserts the paired body is restored — exactly
+  the regression catalog's 0.4.1 upgrade hit.
+
+  From 0.4 onwards, every release that changes a
+  ``generate_*_sql`` body ships a corresponding
+  ``auditrum_django.000N_refresh_schema_*`` migration alongside
+  the version bump.
 - **End-to-end admin-history regression test.** New
   ``tests/integration/test_django_history_pg.py`` installs a real
   trigger via ``TriggerManager``, mutates a row, and asserts

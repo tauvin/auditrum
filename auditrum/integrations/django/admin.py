@@ -87,7 +87,21 @@ class AuditLogAdmin(admin.ModelAdmin):
         "linked_object",
     )
     list_filter = ("operation", "table_name")
-    search_fields = ("object_id", "context_id")
+    # ``context_id`` is only the ``db_column`` of the ``context`` FK —
+    # not a concrete field on the model — so Django's default
+    # ``__icontains`` search lookup fails with ``FieldError: Unsupported
+    # lookup 'icontains' for ForeignKey``. Traverse via ``context__id``
+    # with an explicit ``__exact`` lookup: UUIDs are unique identifiers
+    # so substring matching has no use, and ``exact`` dodges the
+    # ``UPPER(uuid)`` casting that ``iexact`` would trigger. Django 4+
+    # honours explicit lookup suffixes in ``search_fields``.
+    #
+    # The ORM optimises ``context__id__exact`` into a direct
+    # ``auditlog.context_id = <uuid>`` comparison — it detects that
+    # ``id`` is the PK of the referenced ``AuditContext`` and the FK
+    # column already holds that value, so no JOIN is emitted. The
+    # query hits the ``auditlog_context_id_idx`` btree directly.
+    search_fields = ("object_id", "context__id__exact")
     readonly_fields = [f.name for f in AuditLog._meta.fields]
     ordering = ("-changed_at",)
 

@@ -1,0 +1,190 @@
+{
+  "title": "Auditrum — Overview",
+  "uid": "auditrum-overview",
+  "schemaVersion": 39,
+  "version": 1,
+  "editable": true,
+  "refresh": "30s",
+  "time": {
+    "from": "now-6h",
+    "to": "now"
+  },
+  "tags": ["auditrum", "audit", "postgres"],
+  "templating": {
+    "list": [
+      {
+        "name": "datasource",
+        "type": "datasource",
+        "query": "prometheus",
+        "current": {}
+      },
+      {
+        "name": "table",
+        "type": "query",
+        "datasource": "$datasource",
+        "query": "label_values(auditrum_events_total, table)",
+        "includeAll": true,
+        "multi": true,
+        "refresh": 2
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "title": "Audit events / second (by operation)",
+      "type": "timeseries",
+      "datasource": "$datasource",
+      "gridPos": {"x": 0, "y": 0, "w": 12, "h": 8},
+      "targets": [
+        {
+          "expr": "sum by (operation) (rate(auditrum_events_total{table=~\"$table\"}[5m]))",
+          "legendFormat": "{{operation}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops",
+          "color": {"mode": "palette-classic"}
+        }
+      }
+    },
+    {
+      "id": 2,
+      "title": "Audit events / second (top 10 tables)",
+      "type": "timeseries",
+      "datasource": "$datasource",
+      "gridPos": {"x": 12, "y": 0, "w": 12, "h": 8},
+      "targets": [
+        {
+          "expr": "topk(10, sum by (table) (rate(auditrum_events_total[5m])))",
+          "legendFormat": "{{table}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {"unit": "ops"}
+      }
+    },
+    {
+      "id": 3,
+      "title": "Trigger latency (p50 / p95 / p99)",
+      "type": "timeseries",
+      "datasource": "$datasource",
+      "gridPos": {"x": 0, "y": 8, "w": 12, "h": 8},
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.50, sum by (le) (rate(auditrum_trigger_duration_seconds_bucket{table=~\"$table\"}[5m])))",
+          "legendFormat": "p50"
+        },
+        {
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(auditrum_trigger_duration_seconds_bucket{table=~\"$table\"}[5m])))",
+          "legendFormat": "p95"
+        },
+        {
+          "expr": "histogram_quantile(0.99, sum by (le) (rate(auditrum_trigger_duration_seconds_bucket{table=~\"$table\"}[5m])))",
+          "legendFormat": "p99"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {"unit": "s"}
+      }
+    },
+    {
+      "id": 4,
+      "title": "Hash chain status",
+      "type": "stat",
+      "datasource": "$datasource",
+      "gridPos": {"x": 12, "y": 8, "w": 12, "h": 8},
+      "targets": [
+        {
+          "expr": "auditrum_hash_chain_last_verify_ok",
+          "legendFormat": "last verify OK"
+        },
+        {
+          "expr": "auditrum_hash_chain_tip_seq",
+          "legendFormat": "tip chain_seq"
+        },
+        {
+          "expr": "time() - auditrum_hash_chain_last_verify_timestamp_seconds",
+          "legendFormat": "seconds since last verify"
+        }
+      ],
+      "options": {
+        "textMode": "value_and_name",
+        "colorMode": "value"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            {"type": "value", "options": {"1": {"text": "OK", "color": "green"}}},
+            {"type": "value", "options": {"0": {"text": "BROKEN", "color": "red"}}}
+          ]
+        }
+      }
+    },
+    {
+      "id": 5,
+      "title": "Auditlog partition disk usage",
+      "type": "bargauge",
+      "datasource": "$datasource",
+      "gridPos": {"x": 0, "y": 16, "w": 12, "h": 8},
+      "targets": [
+        {
+          "expr": "sort_desc(pg_total_relation_size_bytes{relname=~\"auditlog_.*\"})",
+          "legendFormat": "{{relname}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes"
+        }
+      }
+    },
+    {
+      "id": 6,
+      "title": "Retention lag (oldest partition age vs window)",
+      "type": "timeseries",
+      "datasource": "$datasource",
+      "gridPos": {"x": 12, "y": 16, "w": 12, "h": 8},
+      "targets": [
+        {
+          "expr": "(time() - auditrum_auditlog_oldest_partition_start_timestamp_seconds) - (auditrum_retention_window_seconds)",
+          "legendFormat": "lag beyond retention window"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {"color": "green", "value": null},
+              {"color": "orange", "value": 86400},
+              {"color": "red", "value": 604800}
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": 7,
+      "title": "Audit events table size",
+      "type": "timeseries",
+      "datasource": "$datasource",
+      "gridPos": {"x": 0, "y": 24, "w": 24, "h": 8},
+      "targets": [
+        {
+          "expr": "sum(pg_total_relation_size_bytes{relname=~\"auditlog.*\"})",
+          "legendFormat": "total"
+        },
+        {
+          "expr": "sum by (relname) (pg_total_relation_size_bytes{relname=~\"auditlog_.*\"})",
+          "legendFormat": "{{relname}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {"unit": "bytes"}
+      }
+    }
+  ]
+}

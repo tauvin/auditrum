@@ -186,6 +186,59 @@ class TestAuditLogAdminLinkedObject:
         ):
             assert _auditlog_admin().linked_object(obj) == "-"
 
+    def test_search_fields_excludes_raw_context_id(self):
+        """Regression for the 0.4.1 crash: ``context_id`` is only the
+        DB column of the ``context`` FK, not a concrete model field,
+        so Django's default ``__icontains`` lookup raised ``FieldError``
+        the moment an operator typed into the admin search box. The
+        fix traverses the FK via ``context__id__exact`` — UUIDs are
+        unique identifiers, substring search has no use, and
+        ``exact`` avoids UUIDField casting weirdness that ``iexact``
+        would trigger on PG.
+        """
+        admin_ = _auditlog_admin()
+        assert "context_id" not in admin_.search_fields
+        assert "context__id__exact" in admin_.search_fields
+
+    def test_search_uses_explicit_exact_lookup(self):
+        """Simulate what Django's ModelAdmin.get_search_results does
+        internally: it calls ``construct_search`` on each entry in
+        ``search_fields`` to pick the lookup. With the fix in place,
+        ``context__id__exact`` is used verbatim (Django 4+ respects
+        explicit lookups in search_fields) instead of getting a
+        spurious ``__icontains`` tail that would crash at build time.
+        """
+        from django.contrib.admin.options import ModelAdmin
+
+        admin_ = _auditlog_admin()
+        # Use ``.all()`` (not ``.none()``) so SQL compilation of the
+        # search clause is exercised; ``.none()`` short-circuits to
+        # ``EmptyResultSet`` before the WHERE is generated.
+        qs = AuditLog.objects.all()
+        request = MagicMock()
+        request.user = MagicMock()
+        qs, _ = ModelAdmin.get_search_results(
+            admin_,
+            request,
+            qs,
+            "00000000-0000-0000-0000-000000000001",
+        )
+        # If ``search_fields`` still referenced the bare FK column,
+        # building the SQL would raise ``FieldError`` for icontains.
+        # Forcing the SQL compile here is what makes the assertion
+        # meaningful.
+        sql = str(qs.query)
+        # Django optimises ``context__id__exact`` into a direct
+        # comparison on ``auditlog.context_id`` — the FK column IS the
+        # foreign key's ``id`` value, so no JOIN to ``audit_context``
+        # is needed. The SQL below would have been
+        # ``auditlog.context_id = <uuid>`` (possibly CAST-wrapped).
+        assert "context_id" in sql
+        # object_id participates in the OR via icontains for
+        # non-UUID terms.
+        assert "object_id" in sql
+        assert "LIKE" in sql.upper()
+
     def test_renders_link_when_instance_has_get_absolute_url(self):
         class FakeManager:
             def get(self, pk):

@@ -353,6 +353,51 @@ No code change needed on upgrade — the decorator figures out the
 right wrapper based on the target. Sync code still gets the sync
 wrapper so there's no loss of ergonomics for non-async callsites.
 
+### Async ORM and thread-pool dispatch
+
+Django's async ORM methods (`acreate`, `asave`, `adelete`, `aupdate`,
+`afilter`, `aiterator`, …) run their SQL on thread-pool workers via
+`asgiref.sync.sync_to_async`. Each worker thread has its **own**
+`DatabaseWrapper` instance because `django.db.connections` is
+thread-local.
+
+Up until 0.4, `auditrum_context` registered its execute wrapper by
+calling `connection.execute_wrapper(...)` — which bound the wrapper
+to the **current** thread's `DatabaseWrapper`. Under async ORM
+traffic, the thread-pool workers saw a different wrapper-less
+`DatabaseWrapper` and audit rows were written with
+`context_id = NULL` despite the ContextVar propagating correctly.
+
+Since 0.4, the wrapper is auto-registered on **every**
+`DatabaseWrapper` via the `connection_created` signal —
+`PgAuditIntegrationConfig.ready` wires the signal up and walks
+`connections.all()` for any already-initialised wrappers. From
+that point forward, new thread-pool worker connections register
+the wrapper automatically the moment Django calls their
+`connect()` method.
+
+No code change required on upgrade — the old `with auditrum_context(...)`
+/ `@auditrum_context` call sites work unchanged; they just now
+also cover `acreate` / `asave` / `afilter` ORM calls correctly.
+
+**A caveat for raw-cursor users.** If your code does
+`connection.cursor().execute("INSERT ... RETURNING id")` inside
+`auditrum_context`, the wrapper prepends a `SELECT set_config(...);`
+to the statement, which turns your single-result query into a
+multi-statement submission. psycopg3 exposes each result set
+separately — call `cursor.nextset()` before `fetchone()` to pull
+the RETURNING row:
+
+```python
+with django.db.connection.cursor() as cur:
+    cur.execute("INSERT INTO t (x) VALUES (%s) RETURNING id", (42,))
+    cur.nextset()       # step past the set_config result
+    (row_id,) = cur.fetchone()
+```
+
+The Django ORM handles this internally — the caveat only affects
+code that drives the cursor by hand.
+
 ## Tips and gotchas
 
 - **Tracked models must have a `pk`.** Composite primary keys are not

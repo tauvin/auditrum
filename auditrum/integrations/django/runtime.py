@@ -49,6 +49,37 @@ __all__ = [
 ]
 
 
+def _ensure_wrapper_registered(conn) -> None:
+    """Register :func:`_inject_audit_context` on a ``DatabaseWrapper``
+    if not already present.
+
+    Idempotent — safe to call repeatedly on the same connection, and
+    safe to call on a partially-initialised wrapper
+    (``execute_wrappers`` is always a plain list on Django's
+    ``BaseDatabaseWrapper``, but we guard with ``getattr`` for the
+    edge case of custom backends).
+    """
+    wrappers = getattr(conn, "execute_wrappers", None)
+    if wrappers is None:
+        return
+    if _inject_audit_context not in wrappers:
+        wrappers.append(_inject_audit_context)
+
+
+def _on_connection_created(sender, connection, **kwargs) -> None:  # noqa: ARG001
+    """``django.db.backends.signals.connection_created`` handler.
+
+    Auto-wires the audit context wrapper onto every freshly-
+    connected ``DatabaseWrapper``, including the per-thread wrappers
+    that ``sync_to_async`` lazily creates for async ORM calls. The
+    module-level ``AppConfig.ready`` walk of
+    ``connections.all()`` handles any wrappers that were connected
+    before the signal was wired up; from that point forward the
+    signal keeps new ones covered.
+    """
+    _ensure_wrapper_registered(connection)
+
+
 @dataclass(frozen=True)
 class _Context:
     """Immutable per-request audit context.
@@ -119,8 +150,23 @@ def _can_inject_variable(cursor, sql: str | bytes) -> bool:
 def _inject_audit_context(execute, sql, params, many, context):
     """Prepend ``SET LOCAL``-style config calls to every query.
 
-    Added as a :meth:`django.db.connection.execute_wrapper` by
-    :class:`auditrum_context` on enter and removed on exit.
+    Registered once per ``DatabaseWrapper`` via the
+    ``connection_created`` signal handler in
+    :class:`~auditrum.integrations.django.apps.PgAuditIntegrationConfig`,
+    rather than per-request via ``connection.execute_wrapper`` inside
+    :class:`auditrum_context`. The rationale is async ORM coverage:
+    ``sync_to_async`` dispatches SQL onto thread-pool workers, each
+    with its own thread-local ``DatabaseWrapper``. Registering
+    per-context on ``django.db.connection`` (which resolves to the
+    *current* thread's wrapper) leaves every worker thread's
+    connection without a wrapper and silently drops ``context_id``
+    on async writes.
+
+    Permanent registration is safe because this function is a no-op
+    when ``_tracker.get() is None`` — the context-var check below
+    short-circuits before any SQL is rewritten, so the wrapper
+    costs one dict lookup per query outside an active
+    :class:`auditrum_context` block.
     """
     tracker = _tracker.get()
     if tracker is None:
@@ -182,14 +228,20 @@ class auditrum_context(contextlib.ContextDecorator):
 
     def __init__(self, **metadata: Any) -> None:
         self.metadata: dict[str, Any] = dict(metadata)
-        self._hook = None
         self._token = None
 
     def __enter__(self) -> _Context:
         existing = _tracker.get()
 
         if existing is None:
-            # Outermost context: enrich, register hook, push tracker.
+            # Outermost context: enrich, push tracker. The execute
+            # wrapper is registered at AppConfig.ready time on every
+            # connection via the connection_created signal, so we do
+            # not touch it here. As a belt-and-braces safety for the
+            # case where ``ready`` ran before the current thread's
+            # connection existed (e.g. very early management commands),
+            # we also explicitly register on whatever the current
+            # resolved ``connection`` is now.
             metadata: dict[str, Any] = dict(self.metadata)
 
             # Auto-enrich with OTel trace context + optional Sentry breadcrumb.
@@ -204,8 +256,7 @@ class auditrum_context(contextlib.ContextDecorator):
                 id=uuid.uuid4(),
                 metadata=MappingProxyType(metadata),
             )
-            self._hook = connection.execute_wrapper(_inject_audit_context)
-            self._hook.__enter__()
+            _ensure_wrapper_registered(connection)
             self._token = _tracker.set(new_ctx)
             return new_ctx
 
@@ -221,14 +272,18 @@ class auditrum_context(contextlib.ContextDecorator):
         return merged_ctx
 
     def __exit__(self, *exc) -> None:
+        # The wrapper stays registered on the connection for its
+        # lifetime — it's a no-op when ``_tracker.get() is None``, so
+        # there's nothing to "clean up" on exit beyond resetting the
+        # ContextVar. Leaving it registered is what makes async ORM
+        # work: a thread-pool worker's connection only ever sees the
+        # wrapper through the signal handler, not through anything
+        # this block could set up.
         if self._token is not None:
             try:
                 _tracker.reset(self._token)
             finally:
                 self._token = None
-        if self._hook is not None:
-            self._hook.__exit__(*exc)
-            self._hook = None
 
 
 def current_context() -> _Context | None:
