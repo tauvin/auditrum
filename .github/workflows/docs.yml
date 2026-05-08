@@ -66,7 +66,12 @@ jobs:
   deploy:
     name: Deploy to GitHub Pages
     needs: build
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    # ``workflow_dispatch`` is included so a manual ``gh workflow run
+    # docs.yml --ref main`` (used to re-deploy without a code change,
+    # e.g. after activating Pages or rotating the OIDC trust) actually
+    # publishes. The ``ref`` guard still pins deploys to ``main`` so a
+    # dispatch on a feature branch builds-only.
+    if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     environment:
       name: github-pages
