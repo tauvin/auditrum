@@ -1,5 +1,5 @@
 from django.contrib import admin
-from django.urls import reverse
+from django.urls import NoReverseMatch, reverse
 from django.utils.html import format_html
 
 from auditrum.integrations.django.models import AuditContext, AuditLog
@@ -9,6 +9,25 @@ __all__ = [
     "AuditContextAdmin",
     "AuditLogAdmin",
 ]
+
+
+def _admin_change_url(table_name: str, object_id) -> str | None:
+    """Return the admin ``change`` URL for ``(table_name, object_id)``,
+    or ``None`` if the table doesn't map to a registered admin model or
+    the URL pattern can't be reversed for that object id.
+
+    Resolves the model via the memoised :func:`model_for_table`, so the
+    table → URL-name lookup is O(1) per distinct table_name on the page.
+    """
+    model_cls = model_for_table(table_name)
+    if model_cls is None:
+        return None
+    opts = model_cls._meta
+    url_name = f"admin:{opts.app_label}_{opts.model_name}_change"
+    try:
+        return reverse(url_name, args=[object_id])
+    except NoReverseMatch:
+        return None
 
 
 @admin.register(AuditContext)
@@ -46,11 +65,7 @@ class AuditContextAdmin(admin.ModelAdmin):
         # to whichever is present so the admin row always renders
         # something meaningful for event-by-user triage.
         metadata = obj.metadata or {}
-        return (
-            metadata.get("username")
-            or metadata.get("user_id")
-            or "—"
-        )
+        return metadata.get("username") or metadata.get("user_id") or "—"
 
     @admin.display(description="Change Reason")
     def change_reason(self, obj):
@@ -105,19 +120,88 @@ class AuditLogAdmin(admin.ModelAdmin):
     readonly_fields = [f.name for f in AuditLog._meta.fields]
     ordering = ("-changed_at",)
 
+    # When ``False`` (default) the ``linked_object`` column renders a
+    # cheap ``<table>#<id>`` link to the standard admin change view —
+    # zero SQL queries per row, regardless of page size. When ``True``,
+    # the changelist additionally batch-fetches every referenced target
+    # via :meth:`Manager.in_bulk` (one SELECT per distinct ``table_name``
+    # on the page, **not** one per row) so the column can render the
+    # live ``str(target)``. The default switched in 0.4.4 to fix an N+1
+    # that made changelists with hundreds of events cancellable under
+    # ASGI.
+    resolve_linked_objects: bool = False
+
+    def changelist_view(self, request, extra_context=None):
+        response = super().changelist_view(request, extra_context)
+        if not self.resolve_linked_objects:
+            return response
+        # ``response.context_data`` only exists for TemplateResponse —
+        # it isn't there on redirects (e.g. action POST → 302) or on
+        # responses already rendered by middleware. The early-return
+        # also covers ``cl is None`` when the changelist short-circuits.
+        context_data = getattr(response, "context_data", None) or {}
+        cl = context_data.get("cl")
+        if cl is not None:
+            self._attach_linked_targets(cl.result_list)
+        return response
+
+    @staticmethod
+    def _attach_linked_targets(rows) -> None:
+        """Resolve every ``(table_name, object_id)`` tuple on the page
+        in O(distinct table_names) SELECTs and stash the result on each
+        row as ``_auditrum_linked``. ``linked_object`` then prefers the
+        stashed instance over the cheap link.
+
+        Mismatched PK types (e.g. an int ``object_id`` against a UUID
+        column) raise from ``in_bulk`` — the per-table block is skipped
+        rather than aborting the whole page. Models that aren't
+        installed at all are simply skipped.
+        """
+        buckets: dict[str, set[str]] = {}
+        for row in rows:
+            if row.table_name and row.object_id:
+                buckets.setdefault(row.table_name, set()).add(str(row.object_id))
+
+        resolved: dict[tuple[str, str], object] = {}
+        for table_name, ids in buckets.items():
+            model_cls = model_for_table(table_name)
+            if model_cls is None:
+                continue
+            try:
+                fetched = model_cls._default_manager.in_bulk(ids)
+            except (ValueError, TypeError):
+                continue
+            for pk, instance in fetched.items():
+                resolved[(table_name, str(pk))] = instance
+
+        for row in rows:
+            row._auditrum_linked = resolved.get((row.table_name, str(row.object_id)))
+
     @admin.display(description="Linked Object")
     def linked_object(self, obj):
-        model_class = model_for_table(obj.table_name)
-        if model_class is None or not obj.object_id:
+        if not obj.object_id or not obj.table_name:
             return "-"
-        try:
-            target = model_class._default_manager.get(pk=obj.object_id)
-        except (model_class.DoesNotExist, ValueError, TypeError):
-            return "-"
-        get_url = getattr(target, "get_absolute_url", None)
-        if callable(get_url):
-            try:
-                return format_html('<a href="{}">{}</a>', get_url(), str(target))
-            except Exception:
-                return str(target)
-        return str(target)
+        # Tier 2: when ``resolve_linked_objects`` is enabled and
+        # ``changelist_view`` has stashed a pre-fetched target, render
+        # ``str(target)`` (preserving the pre-0.4.4 behaviour).
+        prefetched = getattr(obj, "_auditrum_linked", None)
+        if prefetched is not None:
+            get_url = getattr(prefetched, "get_absolute_url", None)
+            if callable(get_url):
+                try:
+                    return format_html(
+                        '<a href="{}">{}</a>',
+                        get_url(),
+                        str(prefetched),
+                    )
+                except Exception:
+                    return str(prefetched)
+            return str(prefetched)
+        # Tier 1 default: zero-query link to the standard admin change
+        # view. Keeps the column useful for navigation without paying
+        # one SELECT per row at render time.
+        label = f"{obj.table_name}#{obj.object_id}"
+        url = _admin_change_url(obj.table_name, obj.object_id)
+        if url is None:
+            return label
+        return format_html('<a href="{}">{}</a>', url, label)

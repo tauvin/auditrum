@@ -1,4 +1,5 @@
 from datetime import datetime
+from functools import lru_cache
 from typing import Any, Protocol
 
 from django.apps import apps
@@ -15,6 +16,7 @@ from auditrum.utils import audit_tracked  # re-exported for backwards compatibil
 class _ExecuteCursor(Protocol):
     def execute(self, query: str, params: Any = ..., /) -> Any: ...
 
+
 __all__ = [
     "audit_tracked",
     "link",
@@ -27,15 +29,22 @@ __all__ = [
 ]
 
 
+@lru_cache(maxsize=512)
 def model_for_table(table_name: str) -> type[models.Model] | None:
     """Resolve a Django model class by its ``_meta.db_table`` name.
 
     Returns ``None`` when no installed model matches — the caller is
     expected to fall back to a table-name-only presentation, since audit
     rows can reference tables that live in a different service or were
-    dropped after the event was recorded. Scans ``apps.get_models()``
-    linearly; the set is small and stable per process, so a cache only
-    pays off under pathological schemas.
+    dropped after the event was recorded.
+
+    Scans ``apps.get_models()`` linearly. The result is memoised for the
+    process lifetime: the AuditLog admin changelist calls this once per
+    rendered row, and Django's app registry is frozen after startup, so
+    the cache turns an O(N_rows × N_models) page render into one lookup
+    per distinct ``table_name`` ever seen. Tests that mutate the app
+    registry (rare — usually ``override_settings(INSTALLED_APPS=…)``)
+    must call ``model_for_table.cache_clear()`` explicitly.
     """
     for model in apps.get_models():
         if model._meta.db_table == table_name:
@@ -69,7 +78,9 @@ def resolve_field_value(model_class, field_name, value):
                 value = f"[{value}]"
 
         # Date / Time fields
-        elif isinstance(field, (models.DateTimeField, models.DateField, models.TimeField)) and value:
+        elif (
+            isinstance(field, (models.DateTimeField, models.DateField, models.TimeField)) and value
+        ):
             try:
                 parsed = value
                 if isinstance(value, str):
@@ -102,7 +113,9 @@ def render_log_changes(log):
             "<ul class='space-y-1'>{}</ul>",
             mark_safe(
                 "".join(
-                    format_html("<li><strong>{}</strong>: {}</li>", *resolve_field_value(model_class, k, v))
+                    format_html(
+                        "<li><strong>{}</strong>: {}</li>", *resolve_field_value(model_class, k, v)
+                    )
                     for k, v in log.new_data.items()
                 )
             ),

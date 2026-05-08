@@ -108,6 +108,29 @@ at runtime.
 
 ### Fixed
 
+- **N+1 in ``AuditLogAdmin.linked_object`` (was: tens-of-seconds
+  changelist + ``CancelledError`` under ASGI).** Each row in the
+  ``AuditLog`` admin changelist used to call
+  ``model._default_manager.get(pk=obj.object_id)`` from the template,
+  fanning a single page out into one extra single-row ``SELECT`` per
+  row across ~all the project's audited tables. A 100-row
+  ``?context=<uuid>`` filter routinely crossed proxy/browser timeouts
+  on dev, surfacing as ``asyncio.CancelledError`` raised out of
+  ``sync_to_async(response.render, …)``. The default rendering now
+  emits a zero-query ``<table>#<id>`` link to the standard admin
+  change view — navigation works, no fetch happens. Adopters who want
+  the live ``str(target)`` back can opt in by subclassing the admin
+  with ``resolve_linked_objects = True``: ``changelist_view`` then
+  batch-fetches every referenced target via ``Manager.in_bulk`` per
+  distinct ``table_name`` (``O(distinct tables)`` SELECTs total — for
+  a single-context filter that's almost always one). The polymorphic
+  ``(table_name, object_id)`` relation is unreachable to ``select_
+  related`` / ``prefetch_related``, so this is the only available
+  shape; the per-row fetch was never sound. ``model_for_table`` is
+  now memoised via ``functools.lru_cache`` (the app registry is frozen
+  after startup, so the cache only ever grows by distinct table names
+  encountered). Tests that mutate ``INSTALLED_APPS`` at runtime must
+  call ``model_for_table.cache_clear()`` explicitly.
 - ``auditrum.integrations.django.utils.resolve_field_value`` no longer
   crashes on string date values with ``AttributeError: module
   'django.utils.timezone' has no attribute 'datetime'``. The helper now

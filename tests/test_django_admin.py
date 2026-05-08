@@ -19,9 +19,7 @@ if not django_settings.configured:
             "django.contrib.messages",
             "auditrum.integrations.django",
         ],
-        DATABASES={
-            "default": {"ENGINE": "django.db.backends.sqlite3", "NAME": ":memory:"}
-        },
+        DATABASES={"default": {"ENGINE": "django.db.backends.sqlite3", "NAME": ":memory:"}},
         ROOT_URLCONF="django.contrib.contenttypes.urls",
         TEMPLATES=[
             {
@@ -145,13 +143,25 @@ class TestAuditLogAdminLinkedObject:
     """Regression for the 0.4 content_type bug: ``linked_object`` now
     resolves the instance via ``table_name`` (using ``model_for_table``)
     instead of the always-NULL ``content_object`` GenericForeignKey.
+
+    As of 0.4.4 the column also no longer fans out one SELECT per row.
+    The default path renders a zero-query ``<table>#<id>`` link to the
+    standard admin change view. Opt back in to live ``str(target)`` via
+    ``AuditLogAdmin.resolve_linked_objects = True`` — that path batches
+    fetches in :meth:`changelist_view` to one ``in_bulk`` per distinct
+    ``table_name``.
     """
 
-    def test_returns_dash_when_table_unknown(self):
+    def test_renders_plain_label_when_table_unknown(self):
+        # When ``model_for_table`` doesn't recognise the table, fall back
+        # to a plain ``<table>#<id>`` label. Pre-0.4.4 this was ``"-"``;
+        # the label is strictly more useful for triage (cross-service
+        # audit rows still surface their identity) and avoids the
+        # surprise of dropped models silently disappearing from the UI.
         obj = MagicMock(spec=AuditLog)
         obj.table_name = "__no_such_table__"
         obj.object_id = "1"
-        assert _auditlog_admin().linked_object(obj) == "-"
+        assert _auditlog_admin().linked_object(obj) == "__no_such_table__#1"
 
     def test_returns_dash_when_object_id_empty(self):
         obj = MagicMock(spec=AuditLog)
@@ -159,32 +169,81 @@ class TestAuditLogAdminLinkedObject:
         obj.object_id = ""
         assert _auditlog_admin().linked_object(obj) == "-"
 
-    def test_returns_dash_when_instance_missing(self):
-        """When ``model_for_table`` finds a matching model but the
-        ``object_id`` refers to a deleted / never-existed row, resolve
-        gracefully instead of raising to the admin changelist.
+    def test_returns_dash_when_table_name_empty(self):
+        obj = MagicMock(spec=AuditLog)
+        obj.table_name = ""
+        obj.object_id = "1"
+        assert _auditlog_admin().linked_object(obj) == "-"
+
+    def test_default_path_does_not_hit_db(self):
+        """Regression for the 0.4.3 N+1 in the AuditLog changelist:
+        rendering ``linked_object`` must never call
+        ``Manager.get`` / ``in_bulk`` on the default path. A page with N
+        rows used to issue N extra single-row SELECTs, blowing past
+        proxy/browser timeouts on filtered changelists.
         """
 
-        class FakeDoesNotExist(Exception):
-            pass
+        class ExplodingManager:
+            def get(self, *args, **kwargs):
+                raise AssertionError("linked_object hit the DB on the default path")
 
-        class FakeManager:
-            def get(self, pk):
-                raise FakeDoesNotExist()
+            def in_bulk(self, *args, **kwargs):
+                raise AssertionError("linked_object hit the DB on the default path")
 
         class FakeModel:
-            _default_manager = FakeManager()
-            DoesNotExist = FakeDoesNotExist
+            _default_manager = ExplodingManager()
+            DoesNotExist = Exception
+
+            class _meta:
+                app_label = "fake"
+                model_name = "thing"
 
         obj = MagicMock(spec=AuditLog)
         obj.table_name = "orders"
         obj.object_id = "99999999"
 
-        with patch(
-            "auditrum.integrations.django.admin.model_for_table",
-            return_value=FakeModel,
+        with (
+            patch(
+                "auditrum.integrations.django.admin.model_for_table",
+                return_value=FakeModel,
+            ),
+            patch(
+                "auditrum.integrations.django.admin.reverse",
+                return_value="/admin/fake/thing/99999999/change/",
+            ),
         ):
-            assert _auditlog_admin().linked_object(obj) == "-"
+            html = _auditlog_admin().linked_object(obj)
+
+        assert "orders#99999999" in html
+        assert "/admin/fake/thing/99999999/change/" in html
+
+    def test_default_path_falls_back_to_label_when_no_admin_route(self):
+        """When the model exists but isn't admin-registered (so
+        ``reverse`` raises ``NoReverseMatch``), drop the ``<a>`` wrap
+        and emit the bare ``<table>#<id>`` label.
+        """
+        from django.urls import NoReverseMatch
+
+        class FakeModel:
+            class _meta:
+                app_label = "fake"
+                model_name = "thing"
+
+        obj = MagicMock(spec=AuditLog)
+        obj.table_name = "orders"
+        obj.object_id = "1"
+
+        with (
+            patch(
+                "auditrum.integrations.django.admin.model_for_table",
+                return_value=FakeModel,
+            ),
+            patch(
+                "auditrum.integrations.django.admin.reverse",
+                side_effect=NoReverseMatch(),
+            ),
+        ):
+            assert _auditlog_admin().linked_object(obj) == "orders#1"
 
     def test_search_fields_excludes_raw_context_id(self):
         """Regression for the 0.4.1 crash: ``context_id`` is only the
@@ -239,26 +298,142 @@ class TestAuditLogAdminLinkedObject:
         assert "object_id" in sql
         assert "LIKE" in sql.upper()
 
-    def test_renders_link_when_instance_has_get_absolute_url(self):
-        class FakeManager:
-            def get(self, pk):
-                target = MagicMock()
-                target.get_absolute_url = MagicMock(return_value="/orders/1/")
-                target.__str__ = MagicMock(return_value="Order #1")
-                return target
-
-        class FakeModel:
-            _default_manager = FakeManager()
-            DoesNotExist = Exception
+    def test_resolved_path_renders_get_absolute_url_when_prefetched(self):
+        """``resolve_linked_objects = True`` opts the admin into the
+        pre-0.4.4 ``str(target)`` rendering. The instance is provided
+        out-of-band (via ``_attach_linked_targets``) on the row as
+        ``_auditrum_linked``; ``linked_object`` then prefers it over
+        the cheap link.
+        """
+        target = MagicMock()
+        target.get_absolute_url = MagicMock(return_value="/orders/1/")
+        target.__str__ = MagicMock(return_value="Order #1")
 
         obj = MagicMock(spec=AuditLog)
         obj.table_name = "orders"
         obj.object_id = "1"
+        obj._auditrum_linked = target
+
+        html = _auditlog_admin().linked_object(obj)
+        assert "/orders/1/" in html
+        assert "Order #1" in html
+
+    def test_resolved_path_falls_back_to_str_when_no_url(self):
+        # ``MagicMock(spec=[])`` blocks every attr including ``__str__``,
+        # which we still need — use a real class with no
+        # ``get_absolute_url`` attribute instead.
+        class _Target:
+            def __str__(self) -> str:
+                return "Order #2"
+
+        obj = MagicMock(spec=AuditLog)
+        obj.table_name = "orders"
+        obj.object_id = "2"
+        obj._auditrum_linked = _Target()
+
+        assert _auditlog_admin().linked_object(obj) == "Order #2"
+
+
+class TestAuditLogAdminBatchedResolve:
+    """The opt-in ``resolve_linked_objects`` path must keep changelist
+    rendering bounded by ``O(distinct table_names)`` SELECTs — the whole
+    point of the 0.4.4 fix is that adopters can recover the live
+    ``str(target)`` column without paying the per-row N+1.
+    """
+
+    def test_batches_in_bulk_per_table_name(self):
+        """50 rows across two distinct ``table_name`` values must hit
+        ``Manager.in_bulk`` exactly twice (once per table), not 50
+        times.
+        """
+        in_bulk_calls: list[tuple[str, set[str]]] = []
+
+        def _make_model(table: str):
+            class _Manager:
+                @staticmethod
+                def in_bulk(ids):
+                    in_bulk_calls.append((table, set(ids)))
+                    return {pk: f"{table}#{pk}" for pk in ids}
+
+            class _Model:
+                _default_manager = _Manager()
+
+            return _Model
+
+        models_by_table = {"orders": _make_model("orders"), "users": _make_model("users")}
+
+        rows = []
+        for i in range(40):
+            row = MagicMock(spec=AuditLog)
+            row.table_name = "orders"
+            row.object_id = str(i)
+            rows.append(row)
+        for i in range(10):
+            row = MagicMock(spec=AuditLog)
+            row.table_name = "users"
+            row.object_id = str(i)
+            rows.append(row)
 
         with patch(
             "auditrum.integrations.django.admin.model_for_table",
-            return_value=FakeModel,
+            side_effect=lambda table: models_by_table.get(table),
         ):
-            html = _auditlog_admin().linked_object(obj)
-        assert "/orders/1/" in html
-        assert "Order #1" in html
+            AuditLogAdmin._attach_linked_targets(rows)
+
+        # Exactly one ``in_bulk`` call per distinct table name, even
+        # though there are 50 rows on the page.
+        assert len(in_bulk_calls) == 2
+        tables_called = {call[0] for call in in_bulk_calls}
+        assert tables_called == {"orders", "users"}
+        # Every row got its target stashed for the renderer.
+        for row in rows:
+            assert row._auditrum_linked == f"{row.table_name}#{row.object_id}"
+
+    def test_skips_table_when_pk_type_mismatches(self):
+        """Mismatched PK types (e.g. integer ``object_id`` against a
+        UUID PK) raise ``ValueError`` from ``in_bulk``. The whole page
+        must keep rendering — only that one table is skipped.
+        """
+
+        class _BadManager:
+            @staticmethod
+            def in_bulk(ids):
+                raise ValueError("badly formed UUID")
+
+        class _BadModel:
+            _default_manager = _BadManager()
+
+        row = MagicMock(spec=AuditLog)
+        row.table_name = "orders"
+        row.object_id = "not-a-uuid"
+
+        with patch(
+            "auditrum.integrations.django.admin.model_for_table",
+            return_value=_BadModel,
+        ):
+            AuditLogAdmin._attach_linked_targets([row])
+
+        assert row._auditrum_linked is None
+
+    def test_changelist_view_skips_resolve_when_disabled(self):
+        """The default ``resolve_linked_objects = False`` must NOT call
+        ``_attach_linked_targets`` — that's what keeps the default page
+        render at zero extra SELECTs.
+        """
+        admin_ = _auditlog_admin()
+        assert admin_.resolve_linked_objects is False
+
+        with (
+            patch.object(
+                AuditLogAdmin,
+                "_attach_linked_targets",
+            ) as attach,
+            patch.object(
+                django_admin.ModelAdmin,
+                "changelist_view",
+                return_value=MagicMock(context_data={"cl": MagicMock()}),
+            ),
+        ):
+            admin_.changelist_view(MagicMock())
+
+        attach.assert_not_called()
