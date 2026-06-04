@@ -106,7 +106,46 @@ month's partition** alone, and is re-maintained on *every* audited write
 the time-travel ``target`` index sees moderate use. **Takeaway:** if you
 never run ``WHERE diff @> …`` containment queries, the GIN-on-diff index
 is pure write tax and disk — drop it. (auditrum should consider making
-it opt-in; tracked as a follow-up.)
+it opt-in — tracked in issue #6, confirmed unused on two deployments.)
+
+### Cross-check: bidwise (production)
+
+A second, independent auditrum deployment — **bidwise**, an active
+auction bidding platform — corroborates the catalog figures and the
+index finding, and adds the production throughput catalog (pre-prod)
+can't. PostgreSQL 17.5, ~3.84M events over 15 days, 8 tracked tables,
+monthly-partitioned, hash chain disabled.
+
+| Metric                    | Catalog (pre-prod)        | Bidwise (production)         |
+|---------------------------|---------------------------|------------------------------|
+| Events / span             | 7.2M / 37 d               | 3.84M / 15 d                 |
+| Peak rate                 | ~3.7 events/s             | **~49 events/s** (2,943/min) |
+| Footprint                 | 25 GB (~3.7 KB/event)     | 10 GB (~2.9 KB/event)        |
+| auditrum trigger (UPDATE) | ~0.31–0.47 ms             | ~1.38 ms                     |
+| Deepest history           | 570 rev → 4.9 ms          | 2,207 rev → 11.3 ms          |
+| GIN-on-diff index         | 0 scans, 704 MB/partition | 0 scans, 859 MB/partition    |
+
+What bidwise adds:
+
+- **Real production throughput.** Sustained bursts to ~49 events/s
+  (2,943 in the busiest minute) — the order of magnitude catalog's
+  pre-prod sample can't show.
+- **Deeper histories.** ``provider_invoice`` rows carry a median of
+  **119** revisions (p99 = 840); the deepest single row, a
+  ``provider_sale`` with **2,207** revisions, reconstructs its index
+  scan in **11.3 ms** — 4× catalog's deepest row for only 2.3× the time,
+  so the composite index scales sub-linearly with depth.
+- **Second GIN-on-diff confirmation.** Unused here too (0 scans,
+  859 MB on one partition) — see #6.
+
+One caveat on the overhead number: bidwise also runs a **legacy audit
+trigger** on the same tables (a ``*_audit_trigger`` left from a
+pre-auditrum in-house setup) that writes to a *separate*
+``common_auditlog`` table — so auditrum's ``auditlog`` figures above are
+clean, with no double-counting, but each write pays ~1.6–2 ms extra
+(~3 ms total). The ~1.38 ms above isolates auditrum's own trigger; it
+runs higher than catalog's mainly because the ``provider_*`` rows are
+wider.
 
 ## Reference microbenchmark (reproduce anywhere)
 
