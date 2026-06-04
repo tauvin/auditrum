@@ -8,7 +8,28 @@ the API stabilises.
 
 ## [Unreleased]
 
-Nothing yet.
+### Security
+
+- **Hash-chain payload now covers the attribution columns and binds the
+  previous row's ``chain_seq``.** The pre-1.0 security review found two
+  blind spots in the tamper-evidence chain:
+  - The hashed payload omitted ``user_id``, ``object_id``, ``diff``,
+    ``context_id`` and ``meta``, so anyone able to write ``auditlog``
+    could rewrite WHO performed a change (and why) while ``verify_chain``
+    still reported the chain intact. These columns are now part of the
+    hashed canonical JSON.
+  - The ``prev_hash`` pointer only proved an ordering of surviving rows,
+    not that none were removed, so deleting an interior row was
+    undetectable. Each row's hash now also binds ``prev_chain_seq`` (the
+    previous surviving row's ``chain_seq``); ``verify_chain`` recomputes
+    against the previous surviving row, so a mid-chain deletion makes the
+    successor's stored hash mismatch.
+
+  This is a chain-format change (hashes computed by older code will no
+  longer verify), but it is safe to ship pre-1.0 because hash chaining is
+  disabled on all deployments — there are no live chains to break. Re-run
+  ``generate_hash_chain_sql()`` (it is idempotent) to install the updated
+  trigger.
 
 ## [0.5.0] — 2026-06-04
 
