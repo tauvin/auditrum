@@ -180,22 +180,20 @@ locked in 2026-04-23; see Open questions below.
 driven by catalog's actual workload. Multi-version CI to lock the
 support matrix before 1.0 makes a public commitment to it.
 
-- [ ] **Benchmark suite in ``benchmarks/``** using ``pytest-benchmark``.
-  Driven by catalog schema where possible:
-  - Trigger overhead per row (INSERT, UPDATE, DELETE), with and
-    without ``track_only`` filtering, with and without ``log_condition``.
-  - Hash chain insert throughput cap (with and without chain enabled).
-  - Time-travel ``reconstruct_row`` latency as a function of audit log
-    size and the row's history depth.
-  - Time-travel ``reconstruct_table`` memory footprint, both
-    ``stream=True`` and default.
-  - ``sync()`` throughput with N specs and warm tracking table.
-  - Composite index performance on a multi-million-row audit log.
-- [ ] **Numbers published in README and docs.** "Catalog observed X%
-  trigger overhead at Y writes/second on PG 17 with 8GB
-  ``shared_buffers``" is the level of specificity we want. Methodology
-  in ``docs/performance.md`` so users can reproduce on their own
-  hardware.
+- [x] **Benchmark suite in ``benchmarks/``** using ``pytest-benchmark``:
+  trigger overhead (INSERT/UPDATE/DELETE, ``track_only`` / ``log_condition``
+  variants), time-travel ``reconstruct_row`` latency, hash-chain insert
+  cost, and ``reconstruct_table`` streaming-vs-materialised memory
+  (``benchmarks/test_stream_memory.py``). The **hash-chain throughput
+  ceiling under concurrency** and the **10M-row** profile are deferred —
+  see "Deferred measurements" below.
+- [x] **Numbers published in docs.** ``docs/performance.md`` now carries
+  real numbers from **two production deployments** (catalog pre-prod and
+  bidwise prod, both PG 17): trigger overhead ~0.3–1.4 ms/write,
+  time-travel ~5–11 ms at 570–2207 revisions, 25 GB / 10 GB footprints,
+  ~49 events/s real prod peak — plus a reproducible reference
+  microbenchmark and the methodology. The GIN-on-diff finding (0 scans on
+  both deployments) drove making that index opt-in (#6).
 - [x] **Multi-version CI matrix.** A 6-cell diagonal in ``ci.yml``
   covering the cartesian space without paying for all 30 combinations:
   - PostgreSQL **13, 14, 15, 16, 17** (one per cell, via the
@@ -207,31 +205,44 @@ support matrix before 1.0 makes a public commitment to it.
   Diagonal respects compatibility (Django 4.2 ≤ Py 3.12; Django 6.0 ≥
   Py 3.12). ``fail-fast: false`` and a per-cell uv cache suffix. Budget
   target ~10 min wall (cells run in parallel).
-- [ ] **Memory profiling for ``reconstruct_table``** on a synthetic 10M
-  audit-row table. The ``stream=True`` server-side cursor mode added
-  in 0.3.1 has never been load-tested — we don't actually know if it
-  works as advertised under real volumes.
-- [ ] **Connection pooling smoke tests** under load: pgbouncer
-  transaction mode, Django ``CONN_MAX_AGE > 0``. Hunting for ``is_local``
-  GUC leaks empirically using catalog's actual pgbouncer setup.
-- [ ] **Catalog production metrics dashboard.** Grafana JSON checked
-  into ``examples/grafana/`` so other users can copy. Tracks: audit
-  events/sec, trigger latency p50/p95/p99, hash chain verify status,
-  partition disk usage, retention lag.
-- [ ] **PyPI Trusted Publishing migration.** Move from token-based
-  ``twine upload`` to OIDC trusted publishing via
-  ``pypa/gh-action-pypi-publish``. PyPI-side configuration + workflow
-  change. One-time work, removes ``secrets.PYPI`` from the repo.
+- [x] **Memory profiling for ``reconstruct_table``.** The ``stream=True``
+  server-side cursor is measured (``benchmarks/test_stream_memory.py``):
+  peak ~1.4 MB streaming vs ~38.6 MB materialised at 50k rows — bounded by
+  the cursor batch, independent of row count. A run at true 10M-row volume
+  is deferred (below). The benchmark also surfaced and fixed a real bug:
+  streaming on an autocommit connection raised ``NoActiveSqlTransaction``
+  (#13).
+- [x] **Production metrics dashboard.** Grafana JSON in
+  ``examples/grafana/`` — audit events/sec, trigger latency p50/p95/p99,
+  hash-chain verify status, partition disk usage, retention lag.
+- [x] **PyPI Trusted Publishing.** OIDC via
+  ``pypa/gh-action-pypi-publish`` — confirmed working by the 0.4.x
+  releases; ``secrets.PYPI`` is gone.
 
-**Done when:** README has a "Performance" section with concrete
-numbers (real catalog pre-prod data with permission); CI matrix is
-green across the cartesian product; catalog is running auditrum in
-production with measured trigger overhead documented; sister projects
-are also live or actively integrating.
+**Deferred measurements (run closer to 1.0, against real load):**
+These need a quiet production window or a restored prod dump, so they are
+intentionally postponed to the pre-release validation pass rather than
+blocking 0.5:
 
-**Effort:** ~3 weeks. The risk on this milestone is what the numbers
-actually show — if trigger overhead is high under catalog load, we
-have to optimise before claiming 1.0 readiness.
+- **Hash-chain throughput ceiling under concurrency.** Both production
+  deployments run with the chain *disabled*, so there are no real-load
+  numbers for the advisory-lock serialisation. A controlled load-test
+  runbook (restore a bidwise dump locally, ``pgbench`` sweep chain-on vs
+  -off across writer counts) is ready to run in a quiet window.
+- **Connection-pooling smoke tests** — pgbouncer transaction mode + Django
+  ``CONN_MAX_AGE > 0``, hunting ``is_local`` GUC leaks against a real
+  pooled setup.
+- **10M-row ``reconstruct_table`` memory profile** at true volume (the
+  streaming bound is already measured at 50k).
+
+**Done when:** ✅ benchmark suite landed; ``docs/performance.md`` carries
+real numbers from two production deployments; CI matrix is green across
+the support surface; auditrum is running in production (catalog + bidwise)
+with measured overhead documented. The deferred load/concurrency
+measurements move to the pre-release (RC) validation pass.
+
+**Effort:** delivered. The deferred items are RC-window work; their risk
+(if chain/concurrency numbers are poor) is carried into the RC, not 0.5.
 
 ---
 
