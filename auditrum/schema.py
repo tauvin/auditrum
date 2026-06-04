@@ -115,12 +115,7 @@ def generate_auditlog_table_sql(table_name: str = "auditlog", diff_gin_index: bo
     # deployments found it gets 0 scans yet costs 700-860 MB per monthly
     # partition and is re-maintained on every audited write. It only helps
     # apps that run `WHERE diff @> '{...}'` jsonb-containment queries.
-    diff_gin_idx_sql = (
-        f"\nCREATE INDEX IF NOT EXISTS {table_name}_diff_gin_idx ON {table_name} USING GIN (diff);"
-        if diff_gin_index
-        else ""
-    )
-    return f"""
+    base_sql = f"""
 CREATE TABLE IF NOT EXISTS {table_name} (
     id serial,
     operation text NOT NULL,
@@ -150,8 +145,14 @@ CREATE INDEX IF NOT EXISTS {table_name}_target_idx
 
 CREATE INDEX IF NOT EXISTS {table_name}_user_id_idx ON {table_name} (user_id);
 CREATE INDEX IF NOT EXISTS {table_name}_changed_at_idx ON {table_name} (changed_at);
-CREATE INDEX IF NOT EXISTS {table_name}_context_id_idx ON {table_name} (context_id);{diff_gin_idx_sql}
+CREATE INDEX IF NOT EXISTS {table_name}_context_id_idx ON {table_name} (context_id);
 """.strip()
+    if diff_gin_index:
+        base_sql += (
+            f"\nCREATE INDEX IF NOT EXISTS {table_name}_diff_gin_idx "
+            f"ON {table_name} USING GIN (diff);"
+        )
+    return base_sql
 
 
 def generate_auditlog_partitions_sql(table_name: str = "auditlog", months_ahead: int = 3) -> str:

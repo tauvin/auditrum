@@ -16,6 +16,9 @@ class Migration(migrations.Migration):
     initial = True
     dependencies = []
 
+    # Reading diff_gin_index/table_name at import time is intentional here:
+    # 0001 runs once on a clean DB, and later changes to either are handled by
+    # 0004_diff_gin_index_optional / the 0003 schema refresh.
     operations = [
         migrations.RunSQL(
             sql="\n\n".join(
