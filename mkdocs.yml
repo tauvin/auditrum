@@ -12,6 +12,7 @@ edit_uri: edit/main/docs/
 # listing.
 nav:
   - Home: README.md
+  - Quickstart: quickstart.md
   - Getting started: getting-started.md
   - Guides:
       - Core concepts: concepts.md
