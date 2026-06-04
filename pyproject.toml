@@ -90,3 +90,81 @@ exclude = ["benchmarks*", "tests*"]
 
 [tool.setuptools.package-data]
 auditrum = ["**/*.html", "**/*.txt", "**/*.sql"]
+
+# ---------------------------------------------------------------------------
+# Tooling config. Consolidated here from the previous ruff.toml / ty.toml /
+# pytest.ini / .coveragerc at the 0.7 RC prep (single source of truth).
+# ---------------------------------------------------------------------------
+
+[tool.ruff]
+line-length = 100
+indent-width = 4
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "C4", "SIM"]
+ignore = ["E501"]
+
+[tool.ruff.format]
+quote-style = "double"
+docstring-code-format = true
+indent-style = "space"
+skip-magic-trailing-comma = false
+
+[tool.ty.environment]
+python-version = "3.11"
+
+[tool.ty.src]
+# Scope per ROADMAP 0.4: core + Django integration only. SQLAlchemy and
+# observability are public-experimental and get polished in the 1.x line.
+include = ["auditrum"]
+exclude = [
+    "auditrum/integrations/sqlalchemy",
+    "auditrum/observability",
+]
+
+[tool.ty.analysis]
+respect-type-ignore-comments = true
+
+[tool.ty.terminal]
+# Core + Django integration are clean as of the 0.4 typing gate; any new
+# warning blocks CI until triaged.
+error-on-warning = true
+
+[tool.pytest.ini_options]
+python_files = "test_*.py"
+python_classes = "Test*"
+python_functions = "test_*"
+# Default test discovery roots. Benchmarks live in a sibling tree and need
+# the ``benchmark`` extras + container setup; keep them out of plain pytest.
+testpaths = ["tests"]
+# Prepend ``*`` to keep hypothesis' default ignores while adding our own.
+norecursedirs = ["*", "benchmarks", ".venv", "build", "dist"]
+
+[tool.coverage.run]
+# Coverage scope mirrors the ty typing gate: core + Django integration.
+source = ["auditrum"]
+branch = true
+omit = [
+    "auditrum/integrations/sqlalchemy/*",
+    "auditrum/observability/*",
+    "*/migrations/*",
+    "*/templates/*",
+    "*/sql/*",
+    "*/tests/*",
+]
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = false
+# Initial floor matches the 0.4 baseline; raise to 90% by 0.7 RC.
+fail_under = 80
+exclude_also = [
+    "pragma: no cover",
+    "if TYPE_CHECKING:",
+    "raise NotImplementedError",
+    '\.\.\.$',
+]
+
+[tool.coverage.html]
+directory = "htmlcov"
