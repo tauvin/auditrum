@@ -26,6 +26,7 @@ nav:
       - CLI reference: cli.md
   - Reference:
       - Architecture: architecture.md
+      - What's new in 1.0: whats-new-1.0.md
       - API stability: api-stability.md
       - API reference: reference/api.md
       - Performance: performance.md
