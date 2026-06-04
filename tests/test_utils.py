@@ -1,4 +1,5 @@
 import asyncio
+import inspect
 from contextlib import contextmanager
 from unittest.mock import MagicMock
 
@@ -59,7 +60,7 @@ class TestWithContextAsync:
     silent no-op. The sync wrapper closed ``audit_context.use(...)``
     before the coroutine was scheduled, so every event emitted by the
     task body ran with an empty context. The wrapper now auto-detects
-    coroutines via :func:`asyncio.iscoroutinefunction` and returns an
+    coroutines via :func:`inspect.iscoroutinefunction` and returns an
     ``async`` wrapper that keeps the context open across every
     ``await`` inside the task.
     """
@@ -98,7 +99,7 @@ class TestWithContextAsync:
         async def task():
             return 1
 
-        assert asyncio.iscoroutinefunction(task)
+        assert inspect.iscoroutinefunction(task)
 
 
 class TestWithChangeReasonAsync:

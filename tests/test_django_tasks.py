@@ -1,6 +1,7 @@
 """Unit tests for the Celery/RQ task-context helpers."""
 
 import asyncio
+import inspect
 import sys
 import types
 
@@ -21,9 +22,7 @@ if not django_settings.configured:
             "django.contrib.messages",
             "auditrum.integrations.django",
         ],
-        DATABASES={
-            "default": {"ENGINE": "django.db.backends.sqlite3", "NAME": ":memory:"}
-        },
+        DATABASES={"default": {"ENGINE": "django.db.backends.sqlite3", "NAME": ":memory:"}},
         ROOT_URLCONF="django.contrib.contenttypes.urls",
         TEMPLATES=[
             {
@@ -80,7 +79,7 @@ class TestAuditTaskDecorator:
         async def task():
             return 1
 
-        assert asyncio.iscoroutinefunction(task)
+        assert inspect.iscoroutinefunction(task)
 
     def test_raises_from_inner_function_still_pops_context(self):
         @audit_task(source="celery")
@@ -133,9 +132,7 @@ class TestInstallCelerySignals:
         class FakeTask:
             name = "myapp.tasks.send_email"
 
-        fake_celery_signals.task_prerun.send(
-            task_id="tid-001", task=FakeTask(), sender=FakeTask
-        )
+        fake_celery_signals.task_prerun.send(task_id="tid-001", task=FakeTask(), sender=FakeTask)
         try:
             ctx = current_context()
             assert ctx is not None
@@ -143,9 +140,7 @@ class TestInstallCelerySignals:
             assert ctx.metadata["task_name"] == "myapp.tasks.send_email"
             assert ctx.metadata["task_id"] == "tid-001"
         finally:
-            fake_celery_signals.task_postrun.send(
-                task_id="tid-001", sender=FakeTask
-            )
+            fake_celery_signals.task_postrun.send(task_id="tid-001", sender=FakeTask)
 
     def test_postrun_pops_context(self, fake_celery_signals):
         from auditrum.integrations.django.tasks import install_celery_signals
@@ -155,14 +150,10 @@ class TestInstallCelerySignals:
         class FakeTask:
             name = "t"
 
-        fake_celery_signals.task_prerun.send(
-            task_id="tid-002", task=FakeTask(), sender=FakeTask
-        )
+        fake_celery_signals.task_prerun.send(task_id="tid-002", task=FakeTask(), sender=FakeTask)
         assert current_context() is not None
 
-        fake_celery_signals.task_postrun.send(
-            task_id="tid-002", sender=FakeTask
-        )
+        fake_celery_signals.task_postrun.send(task_id="tid-002", sender=FakeTask)
         assert current_context() is None
 
     def test_missing_task_id_is_ignored(self, fake_celery_signals):
