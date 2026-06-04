@@ -78,6 +78,19 @@ class AuditSettings:
         return getattr(settings, "PGAUDIT_HASH_CHAIN", False)
 
     @property
+    def diff_gin_index(self) -> bool:
+        """Whether to create a GIN index on the audit log ``diff`` column.
+
+        Default ``False`` (issue #6): production measurements on two
+        independent deployments found this index gets 0 scans yet costs
+        700-860 MB per monthly partition and is re-maintained on every
+        audited write. It only pays off if the app runs ``WHERE diff @>
+        '{...}'`` jsonb-containment queries against the audit log. Set to
+        ``True`` only if you rely on such queries.
+        """
+        return getattr(settings, "PGAUDIT_DIFF_GIN_INDEX", False)
+
+    @property
     def redact_user_agent(self) -> bool:
         """Whether to drop user_agent from audit_context metadata.
 

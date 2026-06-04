@@ -1,5 +1,7 @@
 """Unit tests for AuditSettings — GUC name validation, defaults, overrides."""
 
+import importlib
+
 import pytest
 
 django = pytest.importorskip("django")
@@ -84,9 +86,7 @@ class TestAuditSettingsGucProperties:
         assert audit_settings.guc_metadata == "auditrum.context_metadata"
 
     def test_override_via_django_settings(self, monkeypatch):
-        monkeypatch.setattr(
-            django_settings, "PGAUDIT_GUC_ID", "myapp.audit_id", raising=False
-        )
+        monkeypatch.setattr(django_settings, "PGAUDIT_GUC_ID", "myapp.audit_id", raising=False)
         assert audit_settings.guc_id == "myapp.audit_id"
 
     def test_malicious_override_rejected(self, monkeypatch):
@@ -110,3 +110,58 @@ class TestAuditSettingsGucProperties:
         )
         with pytest.raises(ValueError, match="Invalid PGAUDIT_GUC_METADATA"):
             _ = audit_settings.guc_metadata
+
+
+class TestDiffGinIndexSetting:
+    def test_defaults_to_false(self):
+        assert audit_settings.diff_gin_index is False
+
+    def test_override_via_django_settings(self, monkeypatch):
+        monkeypatch.setattr(django_settings, "PGAUDIT_DIFF_GIN_INDEX", True, raising=False)
+        assert audit_settings.diff_gin_index is True
+
+
+_migration_0004 = importlib.import_module(
+    "auditrum.integrations.django.migrations.0004_diff_gin_index_optional"
+)
+
+
+class _RecordingSchemaEditor:
+    """Minimal schema_editor stand-in that records the SQL passed to execute()."""
+
+    def __init__(self):
+        self.executed = []
+
+    def execute(self, sql, params=()):
+        self.executed.append(sql)
+
+
+class TestDiffGinIndexMigration:
+    """0004 reads PGAUDIT_DIFF_GIN_INDEX lazily at apply time (issue #6)."""
+
+    def test_forward_creates_index_when_enabled(self, monkeypatch):
+        monkeypatch.setattr(django_settings, "PGAUDIT_DIFF_GIN_INDEX", True, raising=False)
+        editor = _RecordingSchemaEditor()
+        _migration_0004.forward(None, editor)
+        assert len(editor.executed) == 1
+        assert editor.executed[0].startswith("CREATE INDEX IF NOT EXISTS")
+        assert "auditlog_diff_gin_idx" in editor.executed[0]
+        assert "USING GIN (diff)" in editor.executed[0]
+
+    def test_forward_drops_index_when_disabled(self, monkeypatch):
+        monkeypatch.setattr(django_settings, "PGAUDIT_DIFF_GIN_INDEX", False, raising=False)
+        editor = _RecordingSchemaEditor()
+        _migration_0004.forward(None, editor)
+        assert editor.executed == ["DROP INDEX IF EXISTS auditlog_diff_gin_idx;"]
+
+    def test_reverse_is_inverse_of_forward(self, monkeypatch):
+        monkeypatch.setattr(django_settings, "PGAUDIT_DIFF_GIN_INDEX", True, raising=False)
+        editor = _RecordingSchemaEditor()
+        _migration_0004.reverse(None, editor)
+        assert editor.executed == ["DROP INDEX IF EXISTS auditlog_diff_gin_idx;"]
+
+        monkeypatch.setattr(django_settings, "PGAUDIT_DIFF_GIN_INDEX", False, raising=False)
+        editor = _RecordingSchemaEditor()
+        _migration_0004.reverse(None, editor)
+        assert editor.executed[0].startswith("CREATE INDEX IF NOT EXISTS")
+        assert "auditlog_diff_gin_idx" in editor.executed[0]

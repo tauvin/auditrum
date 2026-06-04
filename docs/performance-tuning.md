@@ -144,20 +144,61 @@ Tuning options:
   routed to a replica — the wrapper is installed on the default
   connection, so a replica alias is untouched.
 
-## 8. GIN index on ``diff`` — keep or drop
+## 8. Drop the unused GIN-on-diff index
 
-Default: ``auditlog_diff_gin_idx ON auditlog USING GIN (diff)``.
+Historically auditrum created ``auditlog_diff_gin_idx ON auditlog USING
+GIN (diff)`` by default. On the two production deployments we have real
+numbers for, that index recorded **0 scans** while costing **700–860 MB
+per monthly partition** — and it's re-maintained on *every* audited
+write, so it's pure write tax plus disk for those workloads. See the
+measured figures in [Performance → Index footprint](performance.md#index-footprint--a-tuning-finding).
 
-* **Keep** if you run ``diff @> '{"status": …}'`` style queries —
-  the GIN makes them near-instant regardless of log size.
-* **Drop** if your read pattern is always
-  ``for_object(obj)`` / ``for_user(user)`` / ``for_context(ctx)`` —
-  the composite index on ``(table_name, object_id, changed_at DESC)``
-  plus btrees on ``user_id`` / ``context_id`` already cover those.
-  GIN maintenance cost is real on write-heavy audit tables.
+### When it helps vs. when it doesn't
 
-Measure on your data before dropping. See ``EXPLAIN ANALYZE``
-against a representative query.
+* **Keep** it only if you run jsonb-containment queries against the
+  diff, e.g. ``WHERE diff @> '{"status": …}'`` — the GIN makes those
+  near-instant regardless of log size.
+* **Drop** it if your reads go through ``(table_name, object_id,
+  changed_at)`` or ``context_id`` — the common case
+  (``for_object(obj)`` / ``for_user(user)`` / ``for_context(ctx)``).
+  The composite index on ``(table_name, object_id, changed_at DESC)``
+  plus the btrees on ``user_id`` / ``context_id`` already cover those,
+  and the GIN buys nothing.
+
+### Check whether it's actually used
+
+```sql
+SELECT relname, indexrelname, idx_scan
+FROM pg_stat_user_indexes
+WHERE indexrelname LIKE '%diff_gin%'
+ORDER BY idx_scan;
+```
+
+On a partitioned ``auditlog`` the per-partition indexes show up as
+separate rows — scan ``idx_scan`` across them. A row of zeros after a
+representative traffic window is your green light.
+
+### Disable it going forward
+
+The supported way to opt out is at schema-generation time, so new
+deployments and freshly-created partitions never build the index:
+
+* **Django:** set ``PGAUDIT_DIFF_GIN_INDEX = False`` (the default).
+* **Direct schema API:** pass ``diff_gin_index=False`` to
+  ``generate_auditlog_table_sql(...)`` / ``bootstrap_schema(...)``.
+
+### Drop it on an existing database
+
+```sql
+DROP INDEX IF EXISTS auditlog_diff_gin_idx;
+```
+
+Issued against the partitioned parent, this cascades to every
+partition's child index. It's a metadata operation (fast) but takes a
+brief ``ACCESS EXCLUSIVE`` lock on each relation; off-peak is safest.
+``DROP INDEX CONCURRENTLY`` avoids the lock but **can't run inside a
+transaction**, so it can't go in a Django migration — run it manually
+if the lock window matters.
 
 ## 9. ``reconstruct_row`` / ``reconstruct_table`` at scale
 

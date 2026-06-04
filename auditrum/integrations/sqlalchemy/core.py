@@ -124,9 +124,7 @@ class SQLAlchemyExecutor:
 _registry: dict[str, TrackSpec] = {}
 
 
-def _build_filter(
-    fields: list[str] | None, exclude: list[str] | None
-) -> FieldFilter:
+def _build_filter(fields: list[str] | None, exclude: list[str] | None) -> FieldFilter:
     if fields is not None and exclude is not None:
         raise ValueError("track_table(): cannot pass both `fields` and `exclude`")
     if fields is not None:
@@ -184,25 +182,33 @@ def bootstrap_schema(
     audit_table: str = "auditlog",
     context_table: str = "audit_context",
     months_ahead: int = 3,
+    diff_gin_index: bool = False,
 ) -> None:
     """Idempotently install the audit log + context table + helper functions.
 
     Executes the same SQL the Django integration's ``0001_initial``
     migration runs, but via SQLAlchemy transactions. Safe to call on
     every app startup — the DDL uses ``CREATE ... IF NOT EXISTS``.
+
+    ``diff_gin_index`` (default ``False``) is opt-in per issue #6: the GIN
+    index on the ``diff`` jsonb column gets 0 scans in practice yet costs
+    700-860 MB per monthly partition. Set ``True`` only if you query the
+    audit log with ``WHERE diff @> '{...}'``.
     """
     from sqlalchemy import text
 
     parts = [
         generate_audit_context_table_sql(context_table),
-        generate_auditlog_table_sql(audit_table),
+        generate_auditlog_table_sql(audit_table, diff_gin_index=diff_gin_index),
         generate_jsonb_diff_function_sql(),
         generate_audit_attach_context_sql(context_table),
         generate_audit_current_user_id_sql(),
         generate_audit_reconstruct_sql(audit_table),
         generate_auditlog_partitions_sql(audit_table, months_ahead=months_ahead),
     ]
-    full_sql = "\n\n".join(p.rstrip(";") + ";" if not p.rstrip().endswith(";") else p for p in parts)
+    full_sql = "\n\n".join(
+        p.rstrip(";") + ";" if not p.rstrip().endswith(";") else p for p in parts
+    )
 
     with engine.begin() as conn:
         for statement in full_sql.split(";\n"):

@@ -35,6 +35,21 @@ the API stabilises.
 
 ### Changed
 
+- **The ``diff`` GIN index is now opt-in (default off).** auditrum
+  previously created a GIN index on the audit log's ``diff`` jsonb column
+  unconditionally. Production measurements on two independent deployments
+  found this index gets **0 scans** yet costs **700-860 MB per monthly
+  partition** and is re-maintained on every audited write — it only pays
+  off if the app runs ``WHERE diff @> '{...}'`` jsonb-containment queries.
+  It is now gated behind the ``diff_gin_index`` parameter of
+  ``generate_auditlog_table_sql`` / ``bootstrap_schema`` and, on Django,
+  the ``PGAUDIT_DIFF_GIN_INDEX`` setting (all default ``False``). New
+  installs skip the index; existing Django deployments get migration
+  ``0004_diff_gin_index_optional`` which drops it by default (or creates
+  it when ``PGAUDIT_DIFF_GIN_INDEX = True``) — issued against the
+  partitioned parent so the change cascades to every partition. Set the
+  setting to ``True`` to keep the old behaviour (ref issue #6).
+
 - **Python 3.14 forward-compatibility.** The async-detecting decorators
   (``@with_context`` / ``@with_change_reason`` / ``@audit_task``) now
   use ``inspect.iscoroutinefunction`` instead of
