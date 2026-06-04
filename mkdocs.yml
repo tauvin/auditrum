@@ -30,6 +30,7 @@ nav:
       - Migration cookbook: migration-cookbook.md
   - Case studies:
       - Catalog: case-studies/catalog.md
+      - Bidwise: case-studies/bidwise.md
   - Contributing: ../CONTRIBUTING.md
   - Security: ../SECURITY.md
   - Changelog: ../CHANGELOG.md
