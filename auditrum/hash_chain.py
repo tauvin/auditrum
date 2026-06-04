@@ -53,6 +53,8 @@ Caveats:
 * ``pgcrypto`` extension must be available.
 """
 
+from typing import Any
+
 from auditrum.tracking.spec import validate_identifier
 
 __all__ = [
@@ -169,8 +171,11 @@ FOR EACH ROW EXECUTE FUNCTION {fn_name}();
 """.strip()
 
 
-def get_chain_tip(conn, table_name: str = "auditlog") -> dict:
+def get_chain_tip(conn: Any, table_name: str = "auditlog") -> dict:
     """Return the current tip of the hash chain.
+
+    ``conn`` accepts a psycopg ``Connection`` OR a Django connection —
+    anything exposing ``.cursor()`` that returns a PEP-249 cursor.
 
     Returns a dict with ``id``, ``chain_seq``, ``row_hash``, and
     ``changed_at`` of the most recent row in chain-order. Used together
@@ -214,12 +219,15 @@ def get_chain_tip(conn, table_name: str = "auditlog") -> dict:
 
 
 def verify_chain(
-    conn,
+    conn: Any,
     table_name: str = "auditlog",
     *,
     expected_tip: dict | None = None,
 ) -> dict:
     """Verify the hash chain on the audit log using server-side recomputation.
+
+    ``conn`` accepts a psycopg ``Connection`` OR a Django connection —
+    anything exposing ``.cursor()`` that returns a PEP-249 cursor.
 
     The check runs entirely in PostgreSQL to match the trigger's hashing
     behaviour exactly (canonical JSON encoding, timestamp formatting, etc.).
@@ -265,7 +273,9 @@ def verify_chain(
         SELECT
             id,
             row_hash,
-            encode(digest(""" + verify_payload + """, 'sha256'), 'hex') AS expected_hash,
+            encode(digest("""
+        + verify_payload
+        + """, 'sha256'), 'hex') AS expected_hash,
             expected_prev,
             prev_hash
         FROM ordered
@@ -289,9 +299,9 @@ def verify_chain(
         anchor_id = expected_tip.get("id")
         anchor_hash = expected_tip.get("row_hash")
         if anchor_id is not None and anchor_hash is not None:
-            anchor_check = sql.SQL(
-                "SELECT row_hash FROM {tbl} WHERE id = %s"
-            ).format(tbl=sql.Identifier(table_name))
+            anchor_check = sql.SQL("SELECT row_hash FROM {tbl} WHERE id = %s").format(
+                tbl=sql.Identifier(table_name)
+            )
             with conn.cursor() as cur:
                 cur.execute(anchor_check, (anchor_id,))
                 row = cur.fetchone()
@@ -309,8 +319,6 @@ def verify_chain(
                 cur.execute(max_query)
                 actual_max = cur.fetchone()[0]
             if actual_max < anchor_id:
-                broken.append(
-                    (anchor_id, f"tip id missing — actual max id is {actual_max}")
-                )
+                broken.append((anchor_id, f"tip id missing — actual max id is {actual_max}"))
 
     return {"checked": checked, "ok": len(broken) == 0, "broken": broken}

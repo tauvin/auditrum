@@ -122,15 +122,95 @@ class TestAuditrumVerifyChain:
         assert "prev_hash mismatch" in output
 
     def test_uses_configured_table_name(self):
-        """verify_chain is called with ``audit_settings.table_name``."""
+        """Both verify_chain and get_chain_tip are called with
+        ``audit_settings.table_name``."""
         result = {"checked": 0, "ok": True, "broken": []}
         settings_mock = MagicMock()
         settings_mock.table_name = "custom_audit"
 
         with (
             patch(f"{MODULE}.verify_chain", return_value=result) as mock_verify,
+            patch(f"{MODULE}.get_chain_tip", return_value=EMPTY_TIP) as mock_tip,
             patch(f"{MODULE}.audit_settings", settings_mock),
         ):
             call_command("auditrum_verify_chain")
 
         assert mock_verify.call_args.args[1] == "custom_audit"
+        assert mock_tip.call_args.args[1] == "custom_audit"
+
+    def test_expected_tip_json_passed_to_verify_chain(self):
+        """An inline --expected-tip-json is parsed and forwarded as the
+        ``expected_tip`` anchor."""
+        import json
+
+        result = {"checked": 3, "ok": True, "broken": []}
+        anchor = {
+            "id": 7,
+            "chain_seq": 7,
+            "row_hash": "deadbeef",
+            "changed_at": "2026-06-04T00:00:00+00:00",
+        }
+
+        with patch(f"{MODULE}.verify_chain", return_value=result) as mock_verify:
+            call_command(
+                "auditrum_verify_chain",
+                "--expected-tip-json",
+                json.dumps(anchor),
+            )
+
+        assert mock_verify.call_args.kwargs["expected_tip"] == anchor
+
+    def test_expected_tip_json_from_file(self, tmp_path):
+        """--expected-tip-json also accepts a path to a JSON file."""
+        import json
+
+        result = {"checked": 3, "ok": True, "broken": []}
+        anchor = {
+            "id": 7,
+            "chain_seq": 7,
+            "row_hash": "deadbeef",
+            "changed_at": None,
+        }
+        tip_file = tmp_path / "tip.json"
+        tip_file.write_text(json.dumps(anchor))
+
+        with patch(f"{MODULE}.verify_chain", return_value=result) as mock_verify:
+            call_command("auditrum_verify_chain", "--expected-tip-json", str(tip_file))
+
+        assert mock_verify.call_args.kwargs["expected_tip"] == anchor
+
+    def test_expected_tip_mismatch_exits_nonzero(self):
+        """When the anchor doesn't match (tail-deletion / rewrite),
+        verify_chain reports broken and the command exits non-zero."""
+        import json
+
+        anchor = {
+            "id": 7,
+            "chain_seq": 7,
+            "row_hash": "deadbeef",
+            "changed_at": None,
+        }
+        result = {
+            "checked": 6,
+            "ok": False,
+            "broken": [(7, "tip row missing — chain truncated")],
+        }
+
+        with (
+            patch(f"{MODULE}.verify_chain", return_value=result),
+            pytest.raises(CommandError),
+        ):
+            call_command(
+                "auditrum_verify_chain",
+                "--expected-tip-json",
+                json.dumps(anchor),
+            )
+
+    def test_no_expected_tip_passes_none(self):
+        """Without the option, expected_tip is None (default behaviour)."""
+        result = {"checked": 1, "ok": True, "broken": []}
+
+        with patch(f"{MODULE}.verify_chain", return_value=result) as mock_verify:
+            call_command("auditrum_verify_chain")
+
+        assert mock_verify.call_args.kwargs.get("expected_tip") is None

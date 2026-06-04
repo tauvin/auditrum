@@ -59,12 +59,16 @@ class TestAuditrumEnableHashChain:
         with patch(f"{MODULE}.connection", connection_mock):
             call_command("auditrum_enable_hash_chain")
 
-        executed = [call.args[0] for call in cursor.execute.call_args_list]
-        joined = "\n".join(executed)
+        # The multi-statement DDL is sent as ONE execute() call: psycopg runs
+        # the ;-separated statements via the simple query protocol in a single
+        # round-trip. Assert that explicitly so the single-call contract is
+        # documented and protected.
+        cursor.execute.assert_called_once()
+        sql = cursor.execute.call_args.args[0]
 
-        assert "CREATE EXTENSION IF NOT EXISTS pgcrypto" in joined
-        assert "ADD COLUMN IF NOT EXISTS row_hash" in joined
-        assert "auditlog_hash_chain" in joined
+        assert "CREATE EXTENSION IF NOT EXISTS pgcrypto" in sql
+        assert "ADD COLUMN IF NOT EXISTS row_hash" in sql
+        assert "auditlog_hash_chain" in sql
 
     def test_uses_configured_table_name(self):
         """The DDL targets ``audit_settings.table_name``."""

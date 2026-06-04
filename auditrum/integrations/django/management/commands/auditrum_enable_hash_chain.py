@@ -60,6 +60,9 @@ class Command(BaseCommand):
 
         self.stdout.write(f"Enabling hash chain on {table_name}...")
         with connection.cursor() as cur:
+            # generate_hash_chain_sql returns multiple ;-separated statements in
+            # one string; psycopg (3 and 2) runs them in a single round-trip via
+            # the simple query protocol when params is None.
             cur.execute(sql)
 
         self.stdout.write(

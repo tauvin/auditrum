@@ -439,12 +439,30 @@ python manage.py auditrum_verify_chain
 verify alone cannot detect deletion of the *most recent* rows (there's
 no surviving neighbour to mismatch against), and a database superuser
 could in principle rewrite the entire chain and re-hash it. To close both
-gaps, periodically capture the chain tip with `get_chain_tip(...)` and
-store it **outside** the database — S3 with Object Lock, a WORM store, or
-even a printout — then feed it back via `verify_chain(..., expected_tip=)`
-on the next run. `auditrum_verify_chain` prints the current tip on every
-run for exactly this purpose. See [hardening](hardening.md) for the full
-threat model.
+gaps, periodically capture the chain tip and store it **outside** the
+database — S3 with Object Lock, a WORM store, or even a printout — then
+feed it back on the next run via `--expected-tip-json`.
+
+`auditrum_verify_chain` prints the current tip on every run; the
+`--expected-tip-json` option accepts that same shape (keys: `id`,
+`chain_seq`, `row_hash`, `changed_at`) either as an inline JSON string or
+as a path to a JSON file. When the anchored tip is missing or rewritten,
+the command reports it and exits non-zero like any other break.
+
+```bash
+# 1. Capture the tip from a known-good run and stash it off-box. Example
+#    using get_chain_tip directly (run inside `./manage.py shell`):
+#    >>> from auditrum.hash_chain import get_chain_tip
+#    >>> from django.db import connection
+#    >>> import json; print(json.dumps(get_chain_tip(connection)))
+#    Then aws s3 cp the JSON to a WORM bucket, etc.
+
+# 2. Verify hourly, feeding the anchored tip back from its external store:
+# 0 * * * * cd /srv/app && python manage.py auditrum_verify_chain \
+#     --expected-tip-json "$(aws s3 cp s3://worm-bucket/audit-tip.json -)"
+```
+
+See [hardening](hardening.md) for the full threat model.
 
 ## Tips and gotchas
 

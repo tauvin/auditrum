@@ -13,6 +13,9 @@ cannot silently rewrite the whole chain (see the django docs).
 
 from __future__ import annotations
 
+import json
+from pathlib import Path
+
 from django.core.management.base import BaseCommand, CommandError
 from django.db import connection
 
@@ -27,11 +30,45 @@ class Command(BaseCommand):
         "monitoring)."
     )
 
+    def add_arguments(self, parser):
+        parser.add_argument(
+            "--expected-tip-json",
+            help=(
+                "Anchor the chain tip to detect tail-row deletion / "
+                "full-chain rewrite. Accepts either an inline JSON object "
+                "or a path to a JSON file with the shape printed by this "
+                "command / returned by get_chain_tip "
+                "(keys: id, chain_seq, row_hash, changed_at). Capture it "
+                "from a known-good run, store it outside the database, and "
+                "feed it back here on the next run."
+            ),
+        )
+
+    def _load_expected_tip(self, raw: str) -> dict:
+        path = Path(raw)
+        if path.is_file():
+            raw = path.read_text()
+        try:
+            tip = json.loads(raw)
+        except json.JSONDecodeError as exc:
+            raise CommandError(
+                f"--expected-tip-json is not valid JSON nor an existing file: {exc}"
+            ) from exc
+        if not isinstance(tip, dict):
+            raise CommandError("--expected-tip-json must decode to a JSON object.")
+        return tip
+
     def handle(self, *args, **options):
         table_name = audit_settings.table_name
 
-        result = verify_chain(connection, table_name)
+        expected_tip = None
+        if options["expected_tip_json"]:
+            expected_tip = self._load_expected_tip(options["expected_tip_json"])
+
+        # Snapshot the head BEFORE verifying so the printed tip reflects the
+        # chain state at the moment verification started.
         tip = get_chain_tip(connection, table_name)
+        result = verify_chain(connection, table_name, expected_tip=expected_tip)
 
         if tip["row_hash"] is not None:
             self.stdout.write(

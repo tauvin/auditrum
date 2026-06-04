@@ -29,7 +29,9 @@ the API stabilises.
     ``verify_chain`` against the configured table, prints the current
     chain tip (for external anchoring) and an intact/broken summary, and
     exits non-zero when the chain is broken so it drops straight into cron
-    or monitoring.
+    or monitoring. ``--expected-tip-json`` feeds a previously-captured tip
+    back as ``verify_chain``'s ``expected_tip=`` anchor (inline JSON or a
+    path to a JSON file), closing the tail-row-deletion gap from cron.
 
 ### Changed
 
