@@ -257,7 +257,7 @@ def run_static_sql(
             # pipes every identifier through `validate_identifier` before
             # it reaches an f-string. pglast round-trip fuzzing planned
             # in ROADMAP 0.4 is the stronger long-term guard.
-            cur.execute(sql)  # ty: ignore[invalid-argument-type]
+            cur.execute(sql)  # ty: ignore[no-matching-overload]
             conn.commit()
             log.info("SQL successfully executed")
     except Exception as e:
@@ -285,7 +285,7 @@ def execute_or_print_sql(
             with conn.cursor() as cur:
                 # Same trust boundary as run_static_sql: `sql_fn` is one
                 # of auditrum's validated generators.
-                cur.execute(sql)  # ty: ignore[invalid-argument-type]
+                cur.execute(sql)  # ty: ignore[no-matching-overload]
             conn.commit()
             log.info("SQL successfully executed")
     except Exception as e:
@@ -380,7 +380,9 @@ def verify_chain_cmd(
 
 @app.command()
 def purge(
-    older_than: str = typer.Option(..., "--older-than", help="e.g. '30 days', '6 months', '2 years'"),
+    older_than: str = typer.Option(
+        ..., "--older-than", help="e.g. '30 days', '6 months', '2 years'"
+    ),
     audit_table: str | None = None,
     drop_partitions: bool = typer.Option(
         False,
@@ -446,9 +448,7 @@ def blame(
     ),
     audit_table: str | None = None,
     limit: int = typer.Option(200, "--limit", "-n"),
-    fmt: str = typer.Option(
-        "rich", "--format", "-f", help="rich|text|json"
-    ),
+    fmt: str = typer.Option("rich", "--format", "-f", help="rich|text|json"),
     dsn: str | None = typer.Option(None, "--db-dsn"),
     host: str | None = typer.Option(None, "--db-host"),
     port: int | None = typer.Option(None, "--db-port"),
@@ -498,9 +498,7 @@ def blame(
 @app.command("as-of")
 def as_of(
     table: str,
-    at: str = typer.Argument(
-        ..., help="ISO-8601 timestamp, e.g. 2024-06-12T14:23:00+00:00"
-    ),
+    at: str = typer.Argument(..., help="ISO-8601 timestamp, e.g. 2024-06-12T14:23:00+00:00"),
     object_id: str | None = typer.Option(
         None,
         "--id",

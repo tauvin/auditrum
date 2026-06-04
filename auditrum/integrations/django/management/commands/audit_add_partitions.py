@@ -1,5 +1,3 @@
-
-
 import psycopg
 from django.conf import settings
 from django.core.management.base import BaseCommand
@@ -38,5 +36,5 @@ class Command(BaseCommand):
             # `sql` comes from generate_auditlog_partitions_sql, whose
             # table name is validated via validate_identifier. See
             # auditrum/schema.py:151 for the trust boundary.
-            cur.execute(sql)  # ty: ignore[invalid-argument-type]
+            cur.execute(sql)  # ty: ignore[no-matching-overload]
         self.stdout.write(self.style.SUCCESS("Partitions created successfully."))

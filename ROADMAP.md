@@ -195,14 +195,17 @@ support matrix before 1.0 makes a public commitment to it.
   ``shared_buffers``" is the level of specificity we want. Methodology
   in ``docs/performance.md`` so users can reproduce on their own
   hardware.
-- [ ] **Multi-version CI matrix.** Currently we test one cell:
-  PG 16, Python 3.13, Django latest. Expand to:
-  - PostgreSQL **13, 14, 15, 16, 17**
-  - Python **3.11, 3.12, 3.13** (3.14 once stable)
-  - Django **4.2 LTS, 5.x**
-  Use GitHub Actions matrix with parallelism. Acceptable CI runtime
-  budget: ~10 minutes total wall time despite the matrix expansion.
-  Cache uv venvs per matrix cell.
+- [x] **Multi-version CI matrix.** A 6-cell diagonal in ``ci.yml``
+  covering the cartesian space without paying for all 30 combinations:
+  - PostgreSQL **13, 14, 15, 16, 17** (one per cell, via the
+    ``AUDITRUM_TEST_PG_IMAGE`` env the conftests read)
+  - Python **3.11, 3.12, 3.13, 3.14**
+  - Django **4.2 LTS, 5.2 LTS, 6.0** — support policy is "current LTS
+    lines + latest feature release"; Django pinned per cell with
+    ``uv pip install`` since ``uv.lock`` carries one version.
+  Diagonal respects compatibility (Django 4.2 ≤ Py 3.12; Django 6.0 ≥
+  Py 3.12). ``fail-fast: false`` and a per-cell uv cache suffix. Budget
+  target ~10 min wall (cells run in parallel).
 - [ ] **Memory profiling for ``reconstruct_table``** on a synthetic 10M
   audit-row table. The ``stream=True`` server-side cursor mode added
   in 0.3.1 has never been load-tested — we don't actually know if it
@@ -459,16 +462,20 @@ These are decisions that affect roadmap shape but haven't been made:
    Pages. Same repo, no external service to manage, deploy via
    ``mkdocs gh-deploy`` in a release workflow. Revisit only if the
    docs outgrow what GH Pages can comfortably serve.
-4. **LTS line cadence.** Promise to backport bug fixes to ``1.x`` for
-   12 months, 18 months, or "as needed"? Decide before 1.0
-   announcement.
+4. ~~**LTS line cadence.**~~ **Resolved 2026-06-04:** 12 months. Bug
+   fixes get backported to the latest ``1.x`` line for 12 months after
+   a minor ships. Concrete — unlike "as needed", which would hollow out
+   the LTS promise — and sustainable at a part-time solo pace (18 months
+   is too heavy to hold). Matches the "at least 12 months" wording
+   already in the 1.0.0 section.
 5. **GDPR pseudonymization timing — pre-1.0 or 1.3?** Currently in
    1.3. If catalog has a regulatory deadline that needs it sooner,
    it could move into 0.5 or 0.6. **Need catalog's compliance team
    to confirm whether they need it before 1.0.**
-6. **SQLAlchemy "experimental" status in 1.0.** The current
-   ``auditrum.integrations.sqlalchemy`` works but lacks
-   Alembic-autogenerate parity. Two framings: ship it as
-   ``experimental: API may change`` so 1.1 can clean it up, or
-   remove it from 1.0 entirely so the 1.0 release is purely
-   Django-focused. Decide before 0.7 RC.
+6. ~~**SQLAlchemy "experimental" status in 1.0.**~~ **Resolved
+   2026-06-04:** ship it as ``experimental`` in ``__all__`` (API may
+   change), with 1.1 promoting it to first-class + Alembic-autogenerate
+   parity. Removing it from 1.0 and re-adding in 1.1 would be more churn
+   and read as abandonment; the experimental label keeps the code in the
+   tree while leaving 1.1 free to clean it up. Matches the 1.0 scope
+   (Django first-class, SQLAlchemy experimental).

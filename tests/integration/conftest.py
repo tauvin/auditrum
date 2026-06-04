@@ -1,3 +1,4 @@
+import os
 import socket
 
 import pytest
@@ -13,7 +14,6 @@ def _docker_available() -> bool:
         return True
     except OSError:
         pass
-    import os
 
     user_sock = os.path.expanduser("~/.docker/run/docker.sock")
     if not os.path.exists(user_sock):
@@ -34,7 +34,8 @@ def pg_container():
         pytest.skip("Docker not available; integration tests require testcontainers")
     from testcontainers.postgres import PostgresContainer
 
-    with PostgresContainer("postgres:16-alpine") as container:
+    image = os.environ.get("AUDITRUM_TEST_PG_IMAGE", "postgres:16-alpine")
+    with PostgresContainer(image) as container:
         yield container
 
 
@@ -83,13 +84,9 @@ def fresh_auditlog(pg_conn):
         cur.execute("DROP FUNCTION IF EXISTS _audit_attach_context() CASCADE")
         cur.execute("DROP FUNCTION IF EXISTS _audit_current_user_id() CASCADE")
         cur.execute(
-            "DROP FUNCTION IF EXISTS "
-            "_audit_reconstruct_row(text, text, timestamptz) CASCADE"
+            "DROP FUNCTION IF EXISTS _audit_reconstruct_row(text, text, timestamptz) CASCADE"
         )
-        cur.execute(
-            "DROP FUNCTION IF EXISTS "
-            "_audit_reconstruct_table(text, timestamptz) CASCADE"
-        )
+        cur.execute("DROP FUNCTION IF EXISTS _audit_reconstruct_table(text, timestamptz) CASCADE")
         cur.execute(generate_audit_context_table_sql("audit_context"))
         cur.execute(generate_auditlog_table_sql("auditlog"))
         cur.execute(generate_jsonb_diff_function_sql())
@@ -102,12 +99,8 @@ def fresh_auditlog(pg_conn):
         cur.execute("DROP FUNCTION IF EXISTS _audit_attach_context() CASCADE")
         cur.execute("DROP FUNCTION IF EXISTS _audit_current_user_id() CASCADE")
         cur.execute(
-            "DROP FUNCTION IF EXISTS "
-            "_audit_reconstruct_row(text, text, timestamptz) CASCADE"
+            "DROP FUNCTION IF EXISTS _audit_reconstruct_row(text, text, timestamptz) CASCADE"
         )
-        cur.execute(
-            "DROP FUNCTION IF EXISTS "
-            "_audit_reconstruct_table(text, timestamptz) CASCADE"
-        )
+        cur.execute("DROP FUNCTION IF EXISTS _audit_reconstruct_table(text, timestamptz) CASCADE")
         cur.execute("DROP TABLE IF EXISTS auditlog CASCADE")
         cur.execute("DROP TABLE IF EXISTS audit_context CASCADE")
