@@ -1,15 +1,15 @@
 # Case study — Catalog
 
-**Status:** draft. Shipping numbers, final schema, and a sign-off
-quote land once catalog's team has signed off on publication and
-their retention window has accumulated meaningful production data.
+**Status:** numbers below were measured on catalog's **pre-production**
+environment (real data churn, no live user traffic) in June 2026. A
+production-traffic refresh and a team sign-off quote land later; the
+shapes and ratios are already representative. The same figures back the
+"Catalog pre-prod" section of [performance.md](../performance.md).
 
-<!-- TODO(catalog): confirm wording, numbers, and the commit point. -->
-
-Catalog is a Django 5 / PostgreSQL 16 internal product at the same
+Catalog is a Django 5.x / PostgreSQL 17 internal product at the same
 company that maintains auditrum. It was the first production
 deployment to integrate auditrum end-to-end and has been the
-primary real-world feedback loop driving 0.4.
+primary real-world feedback loop driving the 0.4–0.5 cycle.
 
 ## Why catalog
 
@@ -21,32 +21,49 @@ earlier target. See ``ROADMAP.md`` for the rationale.
 
 ## Workload shape
 
-<!-- TODO(catalog): fill in numbers once published approval is in -->
+Measured over a 37-day window (2026-04-23 → 05-30):
 
-* **Peak write rate:** _tbd_ tracked rows/second.
-* **Tracked models:** _tbd_ tables, _tbd_ total columns under
-  ``@track``.
-* **Audit log size:** _tbd_ rows across _tbd_ months of history.
-* **Hot tables:** _tbd_ — the 3-5 models that produce the majority
-  of events.
+* **Audit log size:** **7.23M events** in a monthly RANGE-partitioned
+  ``auditlog`` (PG 17).
+* **Tracked models:** two — ``catalog_sale`` and ``catalog_item``.
+* **Hot table:** ``catalog_sale`` produces **6.18M events (~85%)**, of
+  which **88% are UPDATEs** (auction-lot state churns constantly);
+  ``catalog_item`` is the other 1.06M (mixed, including DELETEs).
+* **Write rate:** ~2.3 events/s average, ~3.7/s peak. (Pre-prod — this
+  is a functional sample, not a production-throughput ceiling.)
+* **Hash chain:** disabled.
 * **Context propagation path:** HTTP middleware (the standard
   ``AuditrumMiddleware``) for interactive traffic, ``@audit_task``
   (Celery decorator path) for background imports.
 
 ## What we measured
 
-Three comparisons matter:
+(Methodology and the reproducible reference microbenchmark live in
+[performance.md](../performance.md). Trigger figures are the isolated
+``Trigger`` time from ``EXPLAIN (ANALYZE) … ; ROLLBACK``.)
 
-1. **Trigger overhead** on the write path (pre-auditrum vs
-   post-auditrum, same workload).
-2. **Query-side audit usage** — how often does
-   ``AuditLog.objects.for_object(...)`` / ``for_user(...)`` /
-   ``for_context(...)`` actually get called in production code?
-   (Answers the "are we using it?" question.)
-3. **Retention disk footprint** — audit-to-tracked-data ratio
-   per month of retention.
-
-<!-- TODO(catalog): drop actual trigger latency, event rate, disk ratio numbers here -->
+* **Trigger overhead (per UPDATE):** ``catalog_sale`` ~**472 µs**,
+  ``catalog_item`` ~**309 µs** — the cost is dominated by the jsonb
+  diff size and ``auditlog`` index maintenance, not the trigger logic.
+  Sale is the more expensive of the two because its rows produce larger
+  diffs.
+* **Time-travel latency:** the deepest-history row in the dataset (a
+  ``catalog_sale`` with **570 revisions** — the max; p99 is only 25,
+  p50 is 3) reconstructs its index scan in **~4.9 ms**; typical rows
+  come back sub-millisecond. The composite
+  ``(table_name, object_id, changed_at DESC)`` index is used on every
+  monthly partition.
+* **Storage footprint:** **25 GB total** for 7.23M events — ~**3.7 KB
+  per event** (each row stores ``old_data`` + ``new_data`` + ``diff``
+  as jsonb). Notably the indexes are **~1.8× the heap** (16 GB vs
+  8.7 GB).
+* **A real tuning finding:** the default GIN index on ``diff`` recorded
+  **0 scans** yet cost ~**704 MB on a single month's partition** and was
+  re-maintained on every write. Catalog never runs ``WHERE diff @> …``
+  containment queries, so it is pure write-tax — which is exactly why
+  0.5 made that index opt-in
+  ([#6](https://github.com/tauvin/auditrum/issues/6)). The genuinely hot
+  index is ``context_id`` (the admin "events in this context" links).
 
 ## What broke
 
