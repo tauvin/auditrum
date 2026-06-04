@@ -8,103 +8,12 @@ the API stabilises.
 
 ## [Unreleased]
 
-This release kicks off the 0.4 API-stabilization cycle per
-``ROADMAP.md``: public surface locked via ``__all__``, a strict static
-typing gate enforced in CI, and a handful of latent bugs — plus one
-real SQL-injection vector — surfaced by the typing pass.
+Nothing yet.
 
-### Security
-
-#### SQL injection fix in ``auditrum.integrations.django.utils.set_var``
-
-The helper previously built a ``SET {key} = %s`` statement via f-string
-interpolation of the ``key`` argument, which meant any caller-controlled
-``key`` could inject arbitrary SQL ahead of the ``=``. It now uses
-``SELECT set_config(%s, %s, false)`` — both the GUC name and the value
-go through psycopg's parameter binding, so there is no raw string path
-for an attacker-controlled identifier to reach the wire.
-
-Behaviour for well-formed callers is unchanged (session-level variable
-assignment). Ill-formed keys that previously produced a SQL syntax
-error — or worse, silently widened an injection — now raise an explicit
-``InvalidParameterValue`` from Postgres.
-
-The ``cursor`` parameter also gained a ``Protocol`` type annotation, so
-misuse (passing a non-cursor) is caught by the type checker rather than
-at runtime.
+## [0.4.5] — 2026-06-04
 
 ### Added
 
-- **``auditrum_refresh_schema`` management command.** Safety
-  valve for refreshing the PL/pgSQL helper bodies (``jsonb_diff``,
-  ``_audit_attach_context``, ``_audit_current_user_id``, the
-  ``_audit_reconstruct_*`` pair) against the currently-installed
-  Python release. Idempotent — each helper is emitted as
-  ``CREATE OR REPLACE FUNCTION`` so running repeatedly just
-  overwrites with the current body. Supports ``--dry-run`` for
-  auditing what would execute. Primarily exists so users who
-  deploy outside the migration graph (raw psycopg, SQLAlchemy,
-  emergency recovery) can self-heal after an upgrade.
-- **Background-task context helpers.** New
-  ``auditrum.integrations.django.tasks`` module with a per-task
-  ``@audit_task(source="celery", **metadata)`` decorator and a
-  one-shot ``install_celery_signals()`` helper that wires
-  ``task_prerun`` / ``task_postrun`` to auto-wrap every Celery task
-  in ``auditrum_context``. Middleware still covers HTTP only — this
-  closes the ~80% of background-job cases that were hand-written
-  ``with auditrum_context(...)`` blocks before. Works with Celery,
-  RQ, Dramatiq, APScheduler — anything that invokes the decorated
-  callable on the worker.
-- **``@with_context`` / ``@with_change_reason`` are now async-aware.**
-  Both decorators (and ``@audit_task``) detect ``async def`` targets
-  via :func:`asyncio.iscoroutinefunction` and return an ``async``
-  wrapper that keeps the context open across every ``await`` inside
-  the task. The 0.3 sync wrappers closed the block *before* the
-  coroutine was awaited, silently dropping metadata from every
-  audit event emitted by the task body. Sync callsites behave
-  exactly as before.
-- **Strict static typing gate.** ``ty`` (Astral, pinned to ``0.0.31``)
-  checks ``auditrum/`` core and ``auditrum/integrations/django/`` on
-  every push and PR. Config lives in ``ty.toml`` for now; it moves into
-  ``pyproject.toml`` as part of the 0.7 RC cleanup. SQLAlchemy and
-  observability helpers stay out of the gate — both are marked
-  ``public-experimental`` in the roadmap and get polished alongside
-  other integrations in the 1.x line.
-- **``django-stubs>=5.0``** pinned in the new ``typecheck`` extras group
-  so the Django integration gets strict type coverage against the
-  community stubs.
-- **CI workflow** at ``.github/workflows/ci.yml`` running ``ty``,
-  ``pytest``, and ``ruff`` on every push to ``main`` and every PR.
-  ``publish.yml`` remains the release-time gate.
-- **Property-based test suite** at ``tests/test_properties.py`` using
-  ``hypothesis`` and ``pglast``. Four blocks per ROADMAP 0.4: identifier
-  regex fuzz against ``validate_identifier``, ``FieldFilter`` ``only`` /
-  ``exclude`` combinatorics, ``TrackSpec.build`` checksum stability, and
-  render → parse round-trip that feeds every generated trigger SQL back
-  through a real PostgreSQL parser. Catches template regressions
-  (missing semicolons, unbalanced ``DO $$…$$`` blocks, bad quoting)
-  that string-level assertions silently miss.
-- **Coverage gate** at 80% floor (``.coveragerc``, wired into
-  ``ci.yml``). Initial baseline; the target is 90% by the 0.7 RC per
-  ROADMAP 0.4. New unit suites landed in this release to lift the floor:
-  ``test_django_utils.py`` (locks in the ``set_var`` injection fix and
-  the ``timezone.datetime`` bug fix), ``test_django_partitions_command``
-  (covers the ``audit_add_partitions`` management command with a mocked
-  psycopg connection), ``test_django_templatetags``,
-  ``test_django_shell_context``, ``test_django_init``,
-  ``test_django_audit`` (the legacy ``_LegacyRegistryView`` dict-proxy).
-- **Dead-code audit** (``vulture`` + ``ruff F401/F811/F841``) across
-  ``auditrum/`` core and the Django integration turned up 13 candidates,
-  all of which were protocol-required parameters (``__exit__``
-  ``exc_type``/``tb``, Django ``Operation.database_forwards``
-  ``state``/``from_state``/``to_state``) or ``TYPE_CHECKING``-only
-  imports used in string annotations. No real removals; documenting
-  the clean result so future audits don't re-investigate the same
-  false positives.
-- ``__all__`` declarations on all public modules (core, Django
-  integration, SQLAlchemy integration, observability). Locks the public
-  surface so wildcard imports, static analysis, and auto-generated docs
-  see a consistent view of what is and is not part of the supported API.
 - **``update_current_context(**metadata)`` public helper.** Merges extra
   metadata into the already-open request context for frameworks that
   resolve the authenticated principal *after* ``AuditrumMiddleware``
@@ -138,6 +47,11 @@ at runtime.
   ``default``, so ``∅`` is reserved for a genuine SQL ``null`` while
   ``false`` / ``0`` / ``""`` render honestly. The ``<summary>`` now shows
   the changed-field count.
+
+## [0.4.4] — 2026-05-08
+
+### Fixed
+
 - **N+1 in ``AuditLogAdmin.linked_object`` (was: tens-of-seconds
   changelist + ``CancelledError`` under ASGI).** Each row in the
   ``AuditLog`` admin changelist used to call
@@ -161,29 +75,159 @@ at runtime.
   after startup, so the cache only ever grows by distinct table names
   encountered). Tests that mutate ``INSTALLED_APPS`` at runtime must
   call ``model_for_table.cache_clear()`` explicitly.
-- ``auditrum.integrations.django.utils.resolve_field_value`` no longer
-  crashes on string date values with ``AttributeError: module
-  'django.utils.timezone' has no attribute 'datetime'``. The helper now
-  uses ``datetime.fromisoformat`` from the standard library, which was
-  the intended call — ``django.utils.timezone`` never exposed a
-  ``.datetime`` attribute, so this code path raised for every caller
-  that passed a string date.
-- ``auditrum.integrations.django.shell_context`` now actually keeps the
-  ``source="shell"`` stamp alive for the lifetime of the shell session.
-  It previously called ``audit_tracked(...).__enter__()`` on a
-  dangling reference — CPython immediately reclaimed the context
-  manager, which triggered its ``__exit__`` and popped the stamp
-  before the first query could see it. The fix binds the manager to a
-  module-level name and registers an ``atexit`` hook to unwind it
-  cleanly at process shutdown.
-- ``link_to_related_object(obj, name=None)`` now declares
-  ``name: str | None`` instead of ``name: str``. The runtime already
-  accepted ``None`` via the ``name or str(obj)`` guard; the signature
-  was simply wrong.
-- ``auditrum blame`` no longer papers over its ``fmt`` argument with a
-  stale ``# type: ignore[arg-type]`` comment. Runtime validation is
-  unchanged; the signature now reflects it via ``cast(Literal[...])``
-  after the existing runtime check.
+
+## [0.4.3] — 2026-04-23
+
+### Fixed
+
+- **``Model.objects.create`` no longer returns a UUID as the pk.**
+  Reported by the eridan-catalog team on 0.4.2 after integrating
+  the async-ORM fix below. The context-propagation wrapper prepends
+  ``SELECT set_config(...);`` to every user statement — turning a
+  single ``INSERT … RETURNING id`` into a two-statement submission.
+  psycopg3 leaves the cursor on the *first* result set after
+  ``execute``, which is the ``SELECT set_config`` row. That row's
+  first column is the context UUID (``set_config`` returns the
+  value it was set to), so Django's ORM ``cursor.fetchone()``
+  picks up the UUID string and assigns it to ``instance.pk`` —
+  breaking every downstream ``.save()``, FK-assignment, and
+  ``filter(pk=…)`` call, because ``int('d93aa383-…')`` raises
+  ``ValueError``. The database row itself was correct (bigint
+  ``id`` populated by the serial sequence); only the in-memory
+  ``pk`` was corrupt.
+
+  The bug existed latently since the injection pattern was
+  introduced, but was masked in pre-0.4.2 releases by the old
+  wrapper-registration shape: async ORM went through an unwrapped
+  connection (the original async-ORM bug), and sync code paths
+  that happened to read ``cursor.rowcount`` or ``.lastrowid``
+  instead of ``fetchone()`` escaped the issue. The 0.4.2
+  connection-wide signal-based registration put the wrapper on
+  *every* connection, so every ``create()`` now goes through it —
+  and the latent bug surfaced on the primary ORM code path.
+
+  The fix is a single ``cursor.nextset()`` call inside
+  ``_inject_audit_context`` after the user statement executes.
+  That advances the cursor past the ``set_config`` result onto
+  the user query's result set, so ``fetchone()`` /
+  ``fetchall()`` / ``rowcount`` all see exactly what they would
+  without the wrapper. Regression tests in
+  ``tests/integration/test_django_history_pg.py``
+  (``test_insert_returning_inside_context_returns_real_id`` and
+  ``test_django_orm_create_inside_context_has_int_pk``) drive the
+  raw-cursor and ORM code paths against a real Postgres.
+
+## [0.4.2] — 2026-04-23
+
+### Added
+
+- **``auditrum_refresh_schema`` management command.** Safety
+  valve for refreshing the PL/pgSQL helper bodies (``jsonb_diff``,
+  ``_audit_attach_context``, ``_audit_current_user_id``, the
+  ``_audit_reconstruct_*`` pair) against the currently-installed
+  Python release. Idempotent — each helper is emitted as
+  ``CREATE OR REPLACE FUNCTION`` so running repeatedly just
+  overwrites with the current body. Supports ``--dry-run`` for
+  auditing what would execute. Primarily exists so users who
+  deploy outside the migration graph (raw psycopg, SQLAlchemy,
+  emergency recovery) can self-heal after an upgrade.
+
+### Fixed
+
+- **Admin search box no longer 500s.**
+  ``AuditLogAdmin.search_fields`` included the bare string
+  ``"context_id"`` — but that's only the ``db_column`` of the
+  ``context`` FK, not a concrete model field. Django's default
+  ``__icontains`` lookup raised ``FieldError: Unsupported lookup
+  'icontains' for ForeignKey or join on the field not permitted.``
+  the moment an operator typed anything into the search box. The
+  fix routes the lookup through ``context__id__exact`` — UUIDs are
+  unique identifiers, substring matching has no use, and ``exact``
+  avoids the ``UPPER(uuid::text)`` cast that ``iexact`` would need.
+  Django's ORM recognises that ``id`` is the PK of the referenced
+  model and the FK column already holds that value, so the compiled
+  SQL is a direct ``auditlog.context_id = <uuid>`` — it hits the
+  existing ``auditlog_context_id_idx`` btree without joining
+  ``audit_context``. Lived in ``auditrum/integrations/django/admin.py``
+  since 0.3; the content_type bug masked earlier failures by
+  returning an empty changelist before the search filter ran.
+- **Async Django ORM writes now get the right ``context_id``.**
+  Pre-fix, ``auditrum_context`` registered its execute wrapper by
+  calling ``connection.execute_wrapper(...)`` — where ``connection``
+  is a thread-local proxy resolving to the current thread's
+  ``DatabaseWrapper``. Django's async ORM dispatches SQL onto
+  thread-pool workers via ``sync_to_async``; each worker has its
+  own per-thread ``DatabaseWrapper`` that never saw the wrapper, so
+  ``await Model.objects.acreate(...)`` / ``asave`` /
+  ``afilter(...).aupdate`` silently wrote audit rows with
+  ``context_id = NULL`` despite the calling task's ContextVar
+  being propagated correctly by ``asgiref``. The attribution gap
+  was loudest in admin rendering where every async-origin event
+  showed a blank "Source" column, but also quietly broke any
+  query keyed on ``context_id`` downstream.
+
+  The wrapper is now registered once per ``DatabaseWrapper`` via
+  the ``django.db.backends.signals.connection_created`` signal,
+  plus a one-time walk of ``connections.all()`` in
+  ``PgAuditIntegrationConfig.ready`` to cover wrappers that
+  already exist when the app boots. The wrapper short-circuits
+  when ``_tracker.get() is None`` so permanent registration costs
+  one dict lookup per query outside an active context — nothing
+  measurable on a real workload. ``auditrum_context.__enter__`` no
+  longer needs the per-entry hook lifecycle; it only sets the
+  ContextVar now. New integration test
+  ``tests/integration/test_django_history_pg.py::test_async_orm_propagates_context``
+  drives a real ``sync_to_async(thread_sensitive=False)`` dispatch
+  and asserts ``log.context.metadata`` is populated from the
+  outer-thread context — the sync-only unit tests can't reproduce
+  the thread-pool path.
+- **Upgrading from 0.3.x no longer silently keeps the old
+  ``jsonb_diff`` body.** Schema helpers like ``jsonb_diff``,
+  ``_audit_attach_context``, ``_audit_current_user_id``, and the
+  ``_audit_reconstruct_*`` pair were emitted exactly once by
+  ``auditrum_django.0001_initial`` and never refreshed on upgrade.
+  Users who ``pip install -U auditrum && migrate`` ended up with
+  DB-side function bodies frozen at the 0.3 revision — new audit
+  rows were written in the pre-0.4 ``{field: new_value}`` diff
+  shape despite the library being on 0.4. Two mechanisms close
+  the gap: a new ``auditrum_django.0003_refresh_schema_04``
+  migration re-emits every version-dependent helper via
+  ``CREATE OR REPLACE FUNCTION`` on ``migrate``, and a new
+  ``auditrum_refresh_schema`` management command does the same
+  thing on demand as an ops escape hatch (also supports
+  ``--dry-run`` for review). Integration test
+  ``tests/integration/test_refresh_schema_pg.py`` replaces a live
+  ``jsonb_diff`` with the 0.3 body, runs both the migration and
+  the command, and asserts the paired body is restored — exactly
+  the regression catalog's 0.4.1 upgrade hit.
+
+  From 0.4 onwards, every release that changes a
+  ``generate_*_sql`` body ships a corresponding
+  ``auditrum_django.000N_refresh_schema_*`` migration alongside
+  the version bump.
+
+## [0.4.1] — 2026-04-23
+
+### Added
+
+- **Background-task context helpers.** New
+  ``auditrum.integrations.django.tasks`` module with a per-task
+  ``@audit_task(source="celery", **metadata)`` decorator and a
+  one-shot ``install_celery_signals()`` helper that wires
+  ``task_prerun`` / ``task_postrun`` to auto-wrap every Celery task
+  in ``auditrum_context``. Middleware still covers HTTP only — this
+  closes the ~80% of background-job cases that were hand-written
+  ``with auditrum_context(...)`` blocks before. Works with Celery,
+  RQ, Dramatiq, APScheduler — anything that invokes the decorated
+  callable on the worker.
+- **``@with_context`` / ``@with_change_reason`` are now async-aware.**
+  Both decorators (and ``@audit_task``) detect ``async def`` targets
+  via :func:`asyncio.iscoroutinefunction` and return an ``async``
+  wrapper that keeps the context open across every ``await`` inside
+  the task. The 0.3 sync wrappers closed the block *before* the
+  coroutine was awaited, silently dropping metadata from every
+  audit event emitted by the task body. Sync callsites behave
+  exactly as before.
 
 ### Changed
 
@@ -256,79 +300,9 @@ at runtime.
   so a partial run can be retried safely. For a GIN index on ``diff``,
   the queries fall back to a sequential scan regardless — partition
   by ``changed_at`` range if the table is large.
-- **Error messages in the public API now include remediation hints**,
-  not just "what's wrong". Auditing each ``raise ValueError`` /
-  ``raise RuntimeError`` site produced five upgrades:
-  ``FieldFilter.all() must not carry field names`` now tells the caller
-  to use ``.only(...)`` or ``.exclude(...)``;
-  ``FieldFilter.only()/exclude() requires at least one field`` explains
-  the calling convention and points to ``FieldFilter.all()`` for the
-  no-filter case; ``generate_trigger_sql`` with both ``track_only`` and
-  ``exclude_fields`` now spells out what each argument does and that
-  they're mutually exclusive; the retention-interval "Unsupported unit"
-  error lists every recognised unit; and ``TriggerManager.bootstrap``
-  points users at CREATE-privilege checks and the Postgres server log
-  when the DuplicateTable retry path fails. The exception classes are
-  unchanged so ``try / except ValueError`` still catches the same sites.
-- **``TriggerManager.tracking_table`` is now a read-only property.** The
-  value is still validated via ``validate_identifier`` once in
-  ``__init__``; making the attribute read-only ensures the validated
-  identifier cannot be swapped out post-construction and sneak an
-  unchecked string into the f-string-built SQL in ``_fetch_stored``,
-  ``list_installed``, ``_upsert_tracking``, or ``_delete_tracking``.
-  Callers that only read ``mgr.tracking_table`` are unaffected; callers
-  that *assigned* to it (not a documented pattern) now raise
-  ``AttributeError``.
-- ``_tracking_table_ddl(table_name)`` re-validates its argument at
-  entry (defence in depth) so direct internal misuse can't bypass the
-  check established at ``TriggerManager.__init__``.
-
-### Removed
-
-- **Breaking:** the ``_validate_ident`` legacy alias in
-  ``auditrum.tracking.spec`` and ``auditrum.triggers``. The canonical
-  name has been ``validate_identifier`` since 0.3.0; the underscore-
-  prefixed alias was only retained as a drop-in for 0.2 callers. Import
-  ``validate_identifier`` directly. Nothing else in the public surface
-  changed.
-- **Breaking:** ``auditlog.content_type_id`` column plus
-  ``AuditLog.content_type`` / ``AuditLog.content_object``
-  (``GenericForeignKey``) on the Django model. The column was never
-  populated by the framework-agnostic trigger path and every
-  ``AuditLog.objects.filter(content_type=…)`` quietly matched zero
-  rows. The 0.3 admin history page and the ``linked_object`` admin
-  column both routed through this path and were effectively broken —
-  history rendered "No audit records found" for every row, and
-  ``linked_object`` rendered "-" for every entry. The canonical
-  identity key has been ``table_name`` since 0.3.0 (that is what
-  ``AuditLog.objects.for_object`` / ``for_model`` already keyed off),
-  so the GenericForeignKey was dead weight that pulled
-  ``django.contrib.contenttypes``-specific state into a
-  framework-agnostic schema. A new ``0002_drop_content_type_id``
-  Django migration drops the column for existing installs; fresh
-  installs skip it at ``0001_initial`` time.
 
 ### Fixed
 
-- ``AuditHistoryMixin.object_history_view`` (Django admin "History"
-  tab) now actually renders audit events instead of a blank table.
-  The 0.3 view filtered ``AuditLog.objects.filter(content_type=…)``,
-  but the PL/pgSQL trigger never wrote ``content_type_id`` — so the
-  admin page silently reported "No audit records found" even when
-  the ``auditlog`` table held rows for the object. The view now
-  routes through :meth:`AuditLogQuerySet.for_object`, the same path
-  the rest of the public API already used. Also adds
-  ``django.contrib.admin.utils.unquote`` on the ``object_id`` URL
-  kwarg and the standard "object does not exist" redirect so the
-  view behaves like the built-in admin history view.
-- ``AuditLogAdmin.linked_object`` resolves the target instance from
-  ``log.table_name`` (via a new ``model_for_table`` helper) instead
-  of the always-NULL GenericForeignKey, so the admin list view's
-  "Linked Object" column renders a real link again.
-- ``render_log_changes`` (shared template helper for diff rendering)
-  resolves the model class from ``log.table_name`` for the same
-  reason — the 0.3 implementation read ``log.content_type`` and
-  always returned the em-dash fallback.
 - **Admin history template** no longer renders permanently-empty
   ``Source`` and ``Reason`` columns. ``object_history.html`` read
   ``{{ log.source }}`` and ``{{ log.change_reason }}`` — neither
@@ -368,113 +342,6 @@ at runtime.
   rendered the raw ``{{ log.diff }}`` blob in a ``<pre>`` tag, which
   required every project to ship a ``get_item`` template filter just
   to cross-reference ``old_data``.
-- **Admin search box no longer 500s.**
-  ``AuditLogAdmin.search_fields`` included the bare string
-  ``"context_id"`` — but that's only the ``db_column`` of the
-  ``context`` FK, not a concrete model field. Django's default
-  ``__icontains`` lookup raised ``FieldError: Unsupported lookup
-  'icontains' for ForeignKey or join on the field not permitted.``
-  the moment an operator typed anything into the search box. The
-  fix routes the lookup through ``context__id__exact`` — UUIDs are
-  unique identifiers, substring matching has no use, and ``exact``
-  avoids the ``UPPER(uuid::text)`` cast that ``iexact`` would need.
-  Django's ORM recognises that ``id`` is the PK of the referenced
-  model and the FK column already holds that value, so the compiled
-  SQL is a direct ``auditlog.context_id = <uuid>`` — it hits the
-  existing ``auditlog_context_id_idx`` btree without joining
-  ``audit_context``. Lived in ``auditrum/integrations/django/admin.py``
-  since 0.3; the content_type bug masked earlier failures by
-  returning an empty changelist before the search filter ran.
-- **``Model.objects.create`` no longer returns a UUID as the pk.**
-  Reported by the eridan-catalog team on 0.4.2 after integrating
-  the async-ORM fix below. The context-propagation wrapper prepends
-  ``SELECT set_config(...);`` to every user statement — turning a
-  single ``INSERT … RETURNING id`` into a two-statement submission.
-  psycopg3 leaves the cursor on the *first* result set after
-  ``execute``, which is the ``SELECT set_config`` row. That row's
-  first column is the context UUID (``set_config`` returns the
-  value it was set to), so Django's ORM ``cursor.fetchone()``
-  picks up the UUID string and assigns it to ``instance.pk`` —
-  breaking every downstream ``.save()``, FK-assignment, and
-  ``filter(pk=…)`` call, because ``int('d93aa383-…')`` raises
-  ``ValueError``. The database row itself was correct (bigint
-  ``id`` populated by the serial sequence); only the in-memory
-  ``pk`` was corrupt.
-
-  The bug existed latently since the injection pattern was
-  introduced, but was masked in pre-0.4.2 releases by the old
-  wrapper-registration shape: async ORM went through an unwrapped
-  connection (the original async-ORM bug), and sync code paths
-  that happened to read ``cursor.rowcount`` or ``.lastrowid``
-  instead of ``fetchone()`` escaped the issue. The 0.4.2
-  connection-wide signal-based registration put the wrapper on
-  *every* connection, so every ``create()`` now goes through it —
-  and the latent bug surfaced on the primary ORM code path.
-
-  The fix is a single ``cursor.nextset()`` call inside
-  ``_inject_audit_context`` after the user statement executes.
-  That advances the cursor past the ``set_config`` result onto
-  the user query's result set, so ``fetchone()`` /
-  ``fetchall()`` / ``rowcount`` all see exactly what they would
-  without the wrapper. Regression tests in
-  ``tests/integration/test_django_history_pg.py``
-  (``test_insert_returning_inside_context_returns_real_id`` and
-  ``test_django_orm_create_inside_context_has_int_pk``) drive the
-  raw-cursor and ORM code paths against a real Postgres.
-- **Async Django ORM writes now get the right ``context_id``.**
-  Pre-fix, ``auditrum_context`` registered its execute wrapper by
-  calling ``connection.execute_wrapper(...)`` — where ``connection``
-  is a thread-local proxy resolving to the current thread's
-  ``DatabaseWrapper``. Django's async ORM dispatches SQL onto
-  thread-pool workers via ``sync_to_async``; each worker has its
-  own per-thread ``DatabaseWrapper`` that never saw the wrapper, so
-  ``await Model.objects.acreate(...)`` / ``asave`` /
-  ``afilter(...).aupdate`` silently wrote audit rows with
-  ``context_id = NULL`` despite the calling task's ContextVar
-  being propagated correctly by ``asgiref``. The attribution gap
-  was loudest in admin rendering where every async-origin event
-  showed a blank "Source" column, but also quietly broke any
-  query keyed on ``context_id`` downstream.
-
-  The wrapper is now registered once per ``DatabaseWrapper`` via
-  the ``django.db.backends.signals.connection_created`` signal,
-  plus a one-time walk of ``connections.all()`` in
-  ``PgAuditIntegrationConfig.ready`` to cover wrappers that
-  already exist when the app boots. The wrapper short-circuits
-  when ``_tracker.get() is None`` so permanent registration costs
-  one dict lookup per query outside an active context — nothing
-  measurable on a real workload. ``auditrum_context.__enter__`` no
-  longer needs the per-entry hook lifecycle; it only sets the
-  ContextVar now. New integration test
-  ``tests/integration/test_django_history_pg.py::test_async_orm_propagates_context``
-  drives a real ``sync_to_async(thread_sensitive=False)`` dispatch
-  and asserts ``log.context.metadata`` is populated from the
-  outer-thread context — the sync-only unit tests can't reproduce
-  the thread-pool path.
-- **Upgrading from 0.3.x no longer silently keeps the old
-  ``jsonb_diff`` body.** Schema helpers like ``jsonb_diff``,
-  ``_audit_attach_context``, ``_audit_current_user_id``, and the
-  ``_audit_reconstruct_*`` pair were emitted exactly once by
-  ``auditrum_django.0001_initial`` and never refreshed on upgrade.
-  Users who ``pip install -U auditrum && migrate`` ended up with
-  DB-side function bodies frozen at the 0.3 revision — new audit
-  rows were written in the pre-0.4 ``{field: new_value}`` diff
-  shape despite the library being on 0.4. Two mechanisms close
-  the gap: a new ``auditrum_django.0003_refresh_schema_04``
-  migration re-emits every version-dependent helper via
-  ``CREATE OR REPLACE FUNCTION`` on ``migrate``, and a new
-  ``auditrum_refresh_schema`` management command does the same
-  thing on demand as an ops escape hatch (also supports
-  ``--dry-run`` for review). Integration test
-  ``tests/integration/test_refresh_schema_pg.py`` replaces a live
-  ``jsonb_diff`` with the 0.3 body, runs both the migration and
-  the command, and asserts the paired body is restored — exactly
-  the regression catalog's 0.4.1 upgrade hit.
-
-  From 0.4 onwards, every release that changes a
-  ``generate_*_sql`` body ships a corresponding
-  ``auditrum_django.000N_refresh_schema_*`` migration alongside
-  the version bump.
 - **End-to-end admin-history regression test.** New
   ``tests/integration/test_django_history_pg.py`` installs a real
   trigger via ``TriggerManager``, mutates a row, and asserts
@@ -484,6 +351,185 @@ at runtime.
   content_type bug ship in 0.3. Also asserts
   ``log.context.metadata`` is populated end-to-end, locking in the
   template fix.
+
+## [0.4.0] — 2026-04-23
+
+### Removed
+
+- **Breaking:** ``auditlog.content_type_id`` column plus
+  ``AuditLog.content_type`` / ``AuditLog.content_object``
+  (``GenericForeignKey``) on the Django model. The column was never
+  populated by the framework-agnostic trigger path and every
+  ``AuditLog.objects.filter(content_type=…)`` quietly matched zero
+  rows. The 0.3 admin history page and the ``linked_object`` admin
+  column both routed through this path and were effectively broken —
+  history rendered "No audit records found" for every row, and
+  ``linked_object`` rendered "-" for every entry. The canonical
+  identity key has been ``table_name`` since 0.3.0 (that is what
+  ``AuditLog.objects.for_object`` / ``for_model`` already keyed off),
+  so the GenericForeignKey was dead weight that pulled
+  ``django.contrib.contenttypes``-specific state into a
+  framework-agnostic schema. A new ``0002_drop_content_type_id``
+  Django migration drops the column for existing installs; fresh
+  installs skip it at ``0001_initial`` time.
+
+### Fixed
+
+- ``AuditHistoryMixin.object_history_view`` (Django admin "History"
+  tab) now actually renders audit events instead of a blank table.
+  The 0.3 view filtered ``AuditLog.objects.filter(content_type=…)``,
+  but the PL/pgSQL trigger never wrote ``content_type_id`` — so the
+  admin page silently reported "No audit records found" even when
+  the ``auditlog`` table held rows for the object. The view now
+  routes through :meth:`AuditLogQuerySet.for_object`, the same path
+  the rest of the public API already used. Also adds
+  ``django.contrib.admin.utils.unquote`` on the ``object_id`` URL
+  kwarg and the standard "object does not exist" redirect so the
+  view behaves like the built-in admin history view.
+- ``AuditLogAdmin.linked_object`` resolves the target instance from
+  ``log.table_name`` (via a new ``model_for_table`` helper) instead
+  of the always-NULL GenericForeignKey, so the admin list view's
+  "Linked Object" column renders a real link again.
+- ``render_log_changes`` (shared template helper for diff rendering)
+  resolves the model class from ``log.table_name`` for the same
+  reason — the 0.3 implementation read ``log.content_type`` and
+  always returned the em-dash fallback.
+
+## [0.3.2] — 2026-04-18
+
+This release kicks off the 0.4 API-stabilization cycle per
+``ROADMAP.md``: public surface locked via ``__all__``, a strict static
+typing gate enforced in CI, and a handful of latent bugs — plus one
+real SQL-injection vector — surfaced by the typing pass.
+
+### Security
+
+#### SQL injection fix in ``auditrum.integrations.django.utils.set_var``
+
+The helper previously built a ``SET {key} = %s`` statement via f-string
+interpolation of the ``key`` argument, which meant any caller-controlled
+``key`` could inject arbitrary SQL ahead of the ``=``. It now uses
+``SELECT set_config(%s, %s, false)`` — both the GUC name and the value
+go through psycopg's parameter binding, so there is no raw string path
+for an attacker-controlled identifier to reach the wire.
+
+Behaviour for well-formed callers is unchanged (session-level variable
+assignment). Ill-formed keys that previously produced a SQL syntax
+error — or worse, silently widened an injection — now raise an explicit
+``InvalidParameterValue`` from Postgres.
+
+The ``cursor`` parameter also gained a ``Protocol`` type annotation, so
+misuse (passing a non-cursor) is caught by the type checker rather than
+at runtime.
+
+### Added
+
+- **Strict static typing gate.** ``ty`` (Astral, pinned to ``0.0.31``)
+  checks ``auditrum/`` core and ``auditrum/integrations/django/`` on
+  every push and PR. Config lives in ``ty.toml`` for now; it moves into
+  ``pyproject.toml`` as part of the 0.7 RC cleanup. SQLAlchemy and
+  observability helpers stay out of the gate — both are marked
+  ``public-experimental`` in the roadmap and get polished alongside
+  other integrations in the 1.x line.
+- **``django-stubs>=5.0``** pinned in the new ``typecheck`` extras group
+  so the Django integration gets strict type coverage against the
+  community stubs.
+- **CI workflow** at ``.github/workflows/ci.yml`` running ``ty``,
+  ``pytest``, and ``ruff`` on every push to ``main`` and every PR.
+  ``publish.yml`` remains the release-time gate.
+- **Property-based test suite** at ``tests/test_properties.py`` using
+  ``hypothesis`` and ``pglast``. Four blocks per ROADMAP 0.4: identifier
+  regex fuzz against ``validate_identifier``, ``FieldFilter`` ``only`` /
+  ``exclude`` combinatorics, ``TrackSpec.build`` checksum stability, and
+  render → parse round-trip that feeds every generated trigger SQL back
+  through a real PostgreSQL parser. Catches template regressions
+  (missing semicolons, unbalanced ``DO $$…$$`` blocks, bad quoting)
+  that string-level assertions silently miss.
+- **Coverage gate** at 80% floor (``.coveragerc``, wired into
+  ``ci.yml``). Initial baseline; the target is 90% by the 0.7 RC per
+  ROADMAP 0.4. New unit suites landed in this release to lift the floor:
+  ``test_django_utils.py`` (locks in the ``set_var`` injection fix and
+  the ``timezone.datetime`` bug fix), ``test_django_partitions_command``
+  (covers the ``audit_add_partitions`` management command with a mocked
+  psycopg connection), ``test_django_templatetags``,
+  ``test_django_shell_context``, ``test_django_init``,
+  ``test_django_audit`` (the legacy ``_LegacyRegistryView`` dict-proxy).
+- **Dead-code audit** (``vulture`` + ``ruff F401/F811/F841``) across
+  ``auditrum/`` core and the Django integration turned up 13 candidates,
+  all of which were protocol-required parameters (``__exit__``
+  ``exc_type``/``tb``, Django ``Operation.database_forwards``
+  ``state``/``from_state``/``to_state``) or ``TYPE_CHECKING``-only
+  imports used in string annotations. No real removals; documenting
+  the clean result so future audits don't re-investigate the same
+  false positives.
+- ``__all__`` declarations on all public modules (core, Django
+  integration, SQLAlchemy integration, observability). Locks the public
+  surface so wildcard imports, static analysis, and auto-generated docs
+  see a consistent view of what is and is not part of the supported API.
+
+### Changed
+
+- **Error messages in the public API now include remediation hints**,
+  not just "what's wrong". Auditing each ``raise ValueError`` /
+  ``raise RuntimeError`` site produced five upgrades:
+  ``FieldFilter.all() must not carry field names`` now tells the caller
+  to use ``.only(...)`` or ``.exclude(...)``;
+  ``FieldFilter.only()/exclude() requires at least one field`` explains
+  the calling convention and points to ``FieldFilter.all()`` for the
+  no-filter case; ``generate_trigger_sql`` with both ``track_only`` and
+  ``exclude_fields`` now spells out what each argument does and that
+  they're mutually exclusive; the retention-interval "Unsupported unit"
+  error lists every recognised unit; and ``TriggerManager.bootstrap``
+  points users at CREATE-privilege checks and the Postgres server log
+  when the DuplicateTable retry path fails. The exception classes are
+  unchanged so ``try / except ValueError`` still catches the same sites.
+- **``TriggerManager.tracking_table`` is now a read-only property.** The
+  value is still validated via ``validate_identifier`` once in
+  ``__init__``; making the attribute read-only ensures the validated
+  identifier cannot be swapped out post-construction and sneak an
+  unchecked string into the f-string-built SQL in ``_fetch_stored``,
+  ``list_installed``, ``_upsert_tracking``, or ``_delete_tracking``.
+  Callers that only read ``mgr.tracking_table`` are unaffected; callers
+  that *assigned* to it (not a documented pattern) now raise
+  ``AttributeError``.
+- ``_tracking_table_ddl(table_name)`` re-validates its argument at
+  entry (defence in depth) so direct internal misuse can't bypass the
+  check established at ``TriggerManager.__init__``.
+
+### Removed
+
+- **Breaking:** the ``_validate_ident`` legacy alias in
+  ``auditrum.tracking.spec`` and ``auditrum.triggers``. The canonical
+  name has been ``validate_identifier`` since 0.3.0; the underscore-
+  prefixed alias was only retained as a drop-in for 0.2 callers. Import
+  ``validate_identifier`` directly. Nothing else in the public surface
+  changed.
+
+### Fixed
+
+- ``auditrum.integrations.django.utils.resolve_field_value`` no longer
+  crashes on string date values with ``AttributeError: module
+  'django.utils.timezone' has no attribute 'datetime'``. The helper now
+  uses ``datetime.fromisoformat`` from the standard library, which was
+  the intended call — ``django.utils.timezone`` never exposed a
+  ``.datetime`` attribute, so this code path raised for every caller
+  that passed a string date.
+- ``auditrum.integrations.django.shell_context`` now actually keeps the
+  ``source="shell"`` stamp alive for the lifetime of the shell session.
+  It previously called ``audit_tracked(...).__enter__()`` on a
+  dangling reference — CPython immediately reclaimed the context
+  manager, which triggered its ``__exit__`` and popped the stamp
+  before the first query could see it. The fix binds the manager to a
+  module-level name and registers an ``atexit`` hook to unwind it
+  cleanly at process shutdown.
+- ``link_to_related_object(obj, name=None)`` now declares
+  ``name: str | None`` instead of ``name: str``. The runtime already
+  accepted ``None`` via the ``name or str(obj)`` guard; the signature
+  was simply wrong.
+- ``auditrum blame`` no longer papers over its ``fmt`` argument with a
+  stale ``# type: ignore[arg-type]`` comment. Runtime validation is
+  unchanged; the signature now reflects it via ``cast(Literal[...])``
+  after the existing runtime check.
 
 ## [0.3.1] — 2026-04-14
 
