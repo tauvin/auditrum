@@ -5,3 +5,21 @@ dist/
 .idea/
 .vscode/
 .venv/
+
+# Python bytecode / extensions
+__pycache__/
+*.py[cod]
+*.so
+
+# Tooling caches and coverage
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+
+# mkdocs build output
+site/
+
+# macOS
+.DS_Store
