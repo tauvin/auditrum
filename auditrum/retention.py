@@ -99,9 +99,7 @@ def drop_old_partitions(conn, table_name: str, older_than: str) -> list[str]:
     cutoff = _cutoff_for(older_than)
 
     dropped: list[str] = []
-    bound_pattern = re.compile(
-        r"FOR VALUES FROM \('([^']+)'\) TO \('([^']+)'\)", re.IGNORECASE
-    )
+    bound_pattern = re.compile(r"FOR VALUES FROM \('([^']+)'\) TO \('([^']+)'\)", re.IGNORECASE)
 
     with conn.cursor() as cur:
         cur.execute(
@@ -120,7 +118,14 @@ def drop_old_partitions(conn, table_name: str, older_than: str) -> list[str]:
             m = bound_pattern.search(bound_expr)
             if not m:
                 continue
-            upper = datetime.fromisoformat(m.group(2)).replace(tzinfo=UTC)
+            upper = datetime.fromisoformat(m.group(2))
+            if upper.tzinfo is None:
+                # Partition bound literal had no offset — treat it as UTC.
+                # When the literal *does* carry an offset (e.g. a server
+                # with a non-UTC ``timezone`` setting), preserve it rather
+                # than overwriting with UTC, which would shift the bound
+                # and could drop a partition hours early.
+                upper = upper.replace(tzinfo=UTC)
             if upper <= cutoff:
                 cur.execute(sql.SQL("DROP TABLE IF EXISTS {}").format(sql.Identifier(name)))
                 dropped.append(name)
