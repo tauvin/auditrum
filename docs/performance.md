@@ -4,17 +4,17 @@ This page documents **how** we measure auditrum's performance and
 **what the numbers mean** — so a reader can either trust the
 published figures below or reproduce them on their own hardware.
 
-> **The figures below are preliminary reference-hardware numbers**,
-> not production data. They come from a single benchmark run on an
-> Apple M3 Pro under Docker Desktop (PostgreSQL 16-alpine in a
-> testcontainer, Python 3.13, psycopg 3.3). They establish
-> order-of-magnitude overhead only — Docker Desktop's macOS VM
-> inflates absolute timings, and some operations (DELETE, the
-> no-chain INSERT baseline) showed high run-to-run variance. They
-> will be replaced by catalog's production numbers once its workload
-> has run on a real server for a full retention window. **Trust the
-> deltas, not the absolute µs**, and reproduce on your own hardware
-> with the commands below.
+> **Two data sources.** The _Catalog pre-prod_ section reports numbers
+> measured against a live auditrum deployment (~7.2M audit events over
+> 37 days on PostgreSQL 17). The _Reference microbenchmark_ section is a
+> reproducible synthetic suite you can run on your own hardware. Catalog
+> is a **pre-prod** environment — its data churns realistically but it
+> does not carry full production user traffic, so its **throughput**
+> figures are a functional sample, not a production ceiling. The
+> microbench ran once on an Apple M3 Pro under Docker Desktop, whose
+> macOS VM inflates absolute timings — **trust deltas over absolute µs**
+> there. Hash-chain numbers come only from the microbench (catalog runs
+> with the chain disabled).
 
 ## How we measure
 
@@ -48,14 +48,75 @@ uv run pytest benchmarks/ --benchmark-only \
     --benchmark-compare-fail=mean:20%
 ```
 
-## Preliminary numbers (reference hardware)
+## Catalog pre-prod (real workload)
 
-The tables below are the first measured pass — single run, Apple M3
-Pro, Docker Desktop, PostgreSQL 16-alpine, Python 3.13, psycopg 3.3.
-Values are **medians** (more robust than the mean against the VM's
-jitter). Cells marked **—** have no benchmark yet; rows sourced from
-catalog load tests are called out as such. Catalog production numbers
-will supersede these.
+Measured against catalog's live deployment: **PostgreSQL 17**, an
+``auditlog`` of **~7.23M events over 37 days** (2026-04-23 → 05-30),
+RANGE-partitioned by month, hash chain disabled. Two tracked tables:
+``catalog_sale`` (6.18M events, 88% UPDATE) and ``catalog_item``
+(1.06M, mixed incl. DELETE). Trigger figures come from
+``EXPLAIN (ANALYZE) … ROLLBACK`` (the ``Trigger`` line is the isolated
+audit cost); everything else from live introspection.
+
+### Volume & storage footprint
+
+| Metric                | Value                                        |
+|-----------------------|----------------------------------------------|
+| Audit events          | 7.23M over 37 days                           |
+| ``auditlog`` total    | 25 GB (8.7 GB heap + **16 GB indexes**)      |
+| Per event             | ~3.7 KB (stores ``old_data`` + ``new_data`` + ``diff``, all jsonb) |
+| Busiest partition     | May 16 GB · Apr 9.3 GB (monthly partitions)  |
+| Throughput            | avg 2.3 events/s, peak ~3.7/s (pre-prod — not a prod ceiling) |
+
+### Trigger overhead (real schema, trigger-isolated)
+
+The marginal audit cost per write — ``jsonb_diff`` plus the INSERT into
+``auditlog`` (which maintains all six of its indexes, including the
+unused GIN below).
+
+| Operation | Table          | Trigger time |
+|-----------|----------------|--------------|
+| UPDATE    | ``catalog_sale`` | ~472 µs    |
+| UPDATE    | ``catalog_item`` | ~309 µs    |
+
+Representative single samples. ``catalog_sale`` is the more expensive
+of the two because its rows produce larger jsonb diffs. These dwarf the
+synthetic microbench delta (≈22 µs on a 3-column table) — real overhead
+is dominated by row width and by maintaining ``auditlog``'s indexes, not
+by the trigger logic itself.
+
+### Time-travel latency (real history)
+
+The deepest-history row in the dataset (a ``catalog_sale`` with **570
+revisions** — the max; p99 is only 25, p50 is 3) reconstructs its
+underlying index scan in **~4.9 ms**, worst case. Typical rows (3
+events) come back sub-millisecond. The composite
+``(table_name, object_id, changed_at DESC)`` index is used on **every
+partition** (a ``Merge Append`` across the monthly children), so depth
+scales the scan, not a sequential cliff.
+
+### Index footprint — a tuning finding
+
+Indexes are **16 GB against 8.7 GB of heap** (~1.8× the data). The
+biggest single offender is ``auditlog_diff_gin_idx`` — a GIN index on
+the ``diff`` jsonb that recorded **0 scans** yet costs **~704 MB on one
+month's partition** alone, and is re-maintained on *every* audited write
+(it is part of the trigger overhead above). The genuinely hot index is
+``context_id`` (the admin "events in this context" links, ~2.1k scans);
+the time-travel ``target`` index sees moderate use. **Takeaway:** if you
+never run ``WHERE diff @> …`` containment queries, the GIN-on-diff index
+is pure write tax and disk — drop it. (auditrum should consider making
+it opt-in; tracked as a follow-up.)
+
+## Reference microbenchmark (reproduce anywhere)
+
+The tables below are a synthetic suite you can run on any machine —
+single run here on an Apple M3 Pro, Docker Desktop, PostgreSQL
+16-alpine, Python 3.13, psycopg 3.3. Values are **medians** (robust
+against VM jitter). Cells marked **—** have no benchmark yet; rows
+sourced from load tests are called out as such. For the metrics catalog
+covers (overhead, time-travel, footprint) the section above is the
+authoritative real-world reference.
 
 ### Trigger overhead (PG 16-alpine, Python 3.13, psycopg 3.3 — Apple M3 Pro / Docker Desktop)
 
@@ -129,8 +190,9 @@ Python's cursor buffer, independent of result set size.
 
 Planned measurement: 10M-row audit log, iterate all surviving rows
 at a target timestamp, track RSS growth with ``tracemalloc`` +
-``resource.getrusage()`` — land the numbers here once catalog has
-enough history to make the test meaningful.
+``resource.getrusage()``. Catalog's ``auditlog`` is now ~7.2M events,
+within reach of a meaningful run — this is the next catalog number to
+land here.
 
 ## CI matrix
 
