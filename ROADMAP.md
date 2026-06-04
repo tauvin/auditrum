@@ -252,44 +252,41 @@ measurements move to the pre-release (RC) validation pass.
 a real production deployment manual that a new user can follow without
 asking questions.
 
-- [ ] **API reference autogeneration** via ``mkdocs-material`` +
-  ``mkdocstrings``. Browsable API ref published on GitHub Pages or
-  Read the Docs. Our hand-written guides in ``docs/`` complement it
-  but stop pretending to be a reference.
-- [ ] **Production deployment guide** with a real example:
-  - Two-role split (``myapp_admin`` / ``myapp_runtime``)
-  - Retention cron setup
-  - Monitoring dashboard JSON for Grafana (audit event rate, trigger
-    latency, hash chain verify status)
-  - Backup/restore strategy with audit considerations
-  - Rollback playbook
-- [ ] **Migration cookbook**: from ``django-pghistory``,
-  ``django-simple-history``, custom triggers, no audit at all. Each
-  with a worked example showing data preservation strategy.
-- [ ] **Performance tuning guide**: where to look when trigger overhead
-  becomes a problem (track_only, log_condition, partition pruning,
-  hash chain trade-offs, async flush patterns). Cross-references the
-  benchmark numbers from 0.5.
-- [ ] **Catalog case study** in ``docs/case-studies/catalog.md``
-  (with permission): real numbers, real schema, real lessons.
-  Specifically valuable because it documents what an auction-style
-  write-heavy workload actually does to auditrum.
-- [ ] **Sister-project case studies** if available — different shapes
-  of the same library show different angles.
-- [ ] **First-time setup walkthrough** — short markdown+screenshot
-  walkthrough, 5 minutes from ``pip install`` to first audit row.
-- [ ] **``SECURITY.md``** with disclosure email and response SLAs.
-  Required for 1.0; cheaper to write now.
-- [ ] **``CONTRIBUTING.md``** — what kinds of contributions we accept,
-  how to run the test suite, how to file good bug reports.
+- [x] **API reference autogeneration** via ``mkdocs-material`` +
+  ``mkdocstrings`` — ``docs/reference/api.md`` renders the public
+  surface (tiered per ``api-stability.md``); published to GitHub Pages
+  by ``docs.yml`` on merge to main. (PR #18)
+- [x] **Production deployment guide** — ``docs/deployment.md``: the
+  two-role split, retention/partition cron, Grafana monitoring,
+  backup/restore (incl. ``auditrum_refresh_schema`` + chain
+  re-anchoring), upgrades, and a rollback playbook. (PR #19)
+- [x] **Migration cookbook** — greenfield / django-pghistory /
+  django-simple-history / custom triggers, plus a real
+  "remove a legacy in-house audit trigger" recipe from bidwise. (PR #11)
+- [x] **Performance tuning guide** — track_only / log_condition /
+  partition pruning / GIN-on-diff drop, cross-referencing the 0.5
+  numbers. (PR #11)
+- [x] **Catalog case study** — ``docs/case-studies/catalog.md`` with
+  real pre-prod numbers (7.2M events, overhead, time-travel, the
+  GIN finding). (PR #16)
+- [x] **Sister-project case study** — ``docs/case-studies/bidwise.md``
+  (production: ~49 events/s peak, deep histories, second GIN
+  confirmation, the incomplete-migration lesson). (PR #16)
+- [x] **First-time setup walkthrough** — ``docs/quickstart.md``, ~5
+  minutes from ``pip install`` to the first audit row + admin History
+  view. (PR #20)
+- [x] **``SECURITY.md``** — disclosure + response SLAs.
+- [x] **``CONTRIBUTING.md``** — accepted contributions, test suite, bug
+  reports.
 
-**Done when:** API ref is published on a real domain; deployment guide
-covers everything needed to run auditrum in production without asking
-questions; catalog case study is published; new user can go from zero
-to working install in under 10 minutes following the walkthrough.
+**Done when:** ✅ API ref + all guides publish to GitHub Pages
+(``tauvin.github.io/auditrum`` via ``docs.yml``); the deployment guide
+covers running auditrum in production end to end; both the catalog and
+bidwise case studies are published with real numbers; a new user goes
+from zero to first audit row in ~5 minutes via the Quickstart.
 
-**Effort:** ~2 weeks of focused writing. Largely independent of code
-work — could be done in parallel with 0.5 if energy permits.
+**Effort:** delivered. All docs landed against the real numbers from the
+0.5 cycle, so the guides cite measured figures rather than estimates.
 
 ---
 

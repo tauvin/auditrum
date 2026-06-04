@@ -112,8 +112,8 @@ o.save()
 
 for event in o.audit_events.order_by("changed_at"):
     print(event.operation, event.diff, event.context.metadata if event.context else None)
-# INSERT None None
-# UPDATE {'status': 'paid'} {'url': '...', 'user_id': 42, 'source': 'http', ...}
+# INSERT {'status': {'old': None, 'new': 'new'}, 'total': {'old': None, 'new': '99.00'}} None
+# UPDATE {'status': {'old': 'new', 'new': 'paid'}} {'url': '...', 'user_id': 42, 'source': 'http', ...}
 ```
 
 See the [Django guide](django.md) for details on the ORM helpers,
