@@ -16,9 +16,7 @@ _GUC_NAME_RE = re.compile(r"^[a-z_][a-z0-9_]*\.[a-z_][a-z0-9_]*$")
 
 def _validate_guc_name(value: str, label: str) -> str:
     if not isinstance(value, str) or not _GUC_NAME_RE.match(value):
-        raise ValueError(
-            f"Invalid {label}: {value!r} (must match {_GUC_NAME_RE.pattern})"
-        )
+        raise ValueError(f"Invalid {label}: {value!r} (must match {_GUC_NAME_RE.pattern})")
     return value
 
 
@@ -48,8 +46,9 @@ class AuditSettings:
     @property
     def middleware_methods(self) -> tuple:
         return tuple(
-            getattr(settings, "PGAUDIT_MIDDLEWARE_METHODS",
-                    ("GET", "POST", "PUT", "PATCH", "DELETE"))
+            getattr(
+                settings, "PGAUDIT_MIDDLEWARE_METHODS", ("GET", "POST", "PUT", "PATCH", "DELETE")
+            )
         )
 
     @property
@@ -64,6 +63,19 @@ class AuditSettings:
         compliance reason to keep the raw value.
         """
         return getattr(settings, "PGAUDIT_HASH_SESSION_KEY", True)
+
+    @property
+    def diff_gin_index(self) -> bool:
+        """Whether to create a GIN index on the audit log ``diff`` column.
+
+        Default ``False`` (issue #6): production measurements on two
+        independent deployments found this index gets 0 scans yet costs
+        700-860 MB per monthly partition and is re-maintained on every
+        audited write. It only pays off if the app runs ``WHERE diff @>
+        '{...}'`` jsonb-containment queries against the audit log. Set to
+        ``True`` only if you rely on such queries.
+        """
+        return getattr(settings, "PGAUDIT_DIFF_GIN_INDEX", False)
 
     @property
     def redact_user_agent(self) -> bool:
