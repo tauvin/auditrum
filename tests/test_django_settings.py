@@ -84,9 +84,7 @@ class TestAuditSettingsGucProperties:
         assert audit_settings.guc_metadata == "auditrum.context_metadata"
 
     def test_override_via_django_settings(self, monkeypatch):
-        monkeypatch.setattr(
-            django_settings, "PGAUDIT_GUC_ID", "myapp.audit_id", raising=False
-        )
+        monkeypatch.setattr(django_settings, "PGAUDIT_GUC_ID", "myapp.audit_id", raising=False)
         assert audit_settings.guc_id == "myapp.audit_id"
 
     def test_malicious_override_rejected(self, monkeypatch):
@@ -110,3 +108,12 @@ class TestAuditSettingsGucProperties:
         )
         with pytest.raises(ValueError, match="Invalid PGAUDIT_GUC_METADATA"):
             _ = audit_settings.guc_metadata
+
+
+class TestDiffGinIndexSetting:
+    def test_defaults_to_false(self):
+        assert audit_settings.diff_gin_index is False
+
+    def test_override_via_django_settings(self, monkeypatch):
+        monkeypatch.setattr(django_settings, "PGAUDIT_DIFF_GIN_INDEX", True, raising=False)
+        assert audit_settings.diff_gin_index is True

@@ -109,8 +109,17 @@ def generate_audit_current_user_id_sql(
     return render("audit_current_user_id.sql", guc_metadata=guc_metadata).strip()
 
 
-def generate_auditlog_table_sql(table_name: str = "auditlog") -> str:
+def generate_auditlog_table_sql(table_name: str = "auditlog", diff_gin_index: bool = False) -> str:
     validate_identifier(table_name, "table_name")
+    # The diff GIN index is opt-in (issue #6): production measurements on two
+    # deployments found it gets 0 scans yet costs 700-860 MB per monthly
+    # partition and is re-maintained on every audited write. It only helps
+    # apps that run `WHERE diff @> '{...}'` jsonb-containment queries.
+    diff_gin_idx_sql = (
+        f"\nCREATE INDEX IF NOT EXISTS {table_name}_diff_gin_idx ON {table_name} USING GIN (diff);"
+        if diff_gin_index
+        else ""
+    )
     return f"""
 CREATE TABLE IF NOT EXISTS {table_name} (
     id serial,
@@ -141,8 +150,7 @@ CREATE INDEX IF NOT EXISTS {table_name}_target_idx
 
 CREATE INDEX IF NOT EXISTS {table_name}_user_id_idx ON {table_name} (user_id);
 CREATE INDEX IF NOT EXISTS {table_name}_changed_at_idx ON {table_name} (changed_at);
-CREATE INDEX IF NOT EXISTS {table_name}_context_id_idx ON {table_name} (context_id);
-CREATE INDEX IF NOT EXISTS {table_name}_diff_gin_idx ON {table_name} USING GIN (diff);
+CREATE INDEX IF NOT EXISTS {table_name}_context_id_idx ON {table_name} (context_id);{diff_gin_idx_sql}
 """.strip()
 
 
@@ -174,10 +182,7 @@ def generate_jsonb_diff_function_sql() -> str:
 
     Returns a JSONB object in **paired** form::
 
-        {
-          "field_a": {"old": "was", "new": "is"},
-          "field_b": {"old": 1,     "new": 2}
-        }
+        {"field_a": {"old": "was", "new": "is"}, "field_b": {"old": 1, "new": 2}}
 
     The 0.3 implementation emitted ``{field: new_value}`` — a shape
     that forced every consumer to cross-reference ``old_data`` to show

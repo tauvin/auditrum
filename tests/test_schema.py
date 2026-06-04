@@ -29,9 +29,29 @@ class TestGenerateAuditlogTableSql:
         assert "'2025-01-01'" not in sql
         assert "2000-01-01" not in sql
 
-    def test_gin_index_on_diff(self):
+    def test_diff_gin_index_absent_by_default(self):
+        """The diff GIN index is opt-in as of 0.4.6 (issue #6): 0 scans yet
+        700-860 MB/partition on two production deployments. Default off."""
         sql = generate_auditlog_table_sql()
+        assert "GIN (diff)" not in sql
+        assert "diff_gin_idx" not in sql
+
+    def test_diff_gin_index_present_when_opted_in(self):
+        sql = generate_auditlog_table_sql(diff_gin_index=True)
         assert "GIN (diff)" in sql
+        assert "auditlog_diff_gin_idx" in sql
+
+    def test_diff_gin_index_uses_custom_table_name(self):
+        sql = generate_auditlog_table_sql("my_audit", diff_gin_index=True)
+        assert "my_audit_diff_gin_idx" in sql
+        assert "GIN (diff)" in sql
+
+    def test_other_indexes_present_regardless_of_diff_gin(self):
+        sql = generate_auditlog_table_sql()
+        assert "auditlog_target_idx" in sql
+        assert "auditlog_user_id_idx" in sql
+        assert "auditlog_changed_at_idx" in sql
+        assert "auditlog_context_id_idx" in sql
 
     def test_context_id_column_and_index(self):
         sql = generate_auditlog_table_sql()
