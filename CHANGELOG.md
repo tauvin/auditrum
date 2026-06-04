@@ -8,7 +8,14 @@ the API stabilises.
 
 ## [Unreleased]
 
-Nothing yet.
+### Changed
+
+- **Python 3.14 forward-compatibility.** The async-detecting decorators
+  (``@with_context`` / ``@with_change_reason`` / ``@audit_task``) now
+  use ``inspect.iscoroutinefunction`` instead of
+  ``asyncio.iscoroutinefunction``, which Python 3.14 deprecates (removal
+  in 3.16). Behaviour is unchanged; this just silences the
+  ``DeprecationWarning`` on 3.14, now part of the CI test matrix.
 
 ## [0.4.5] — 2026-06-04
 

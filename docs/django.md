@@ -334,7 +334,7 @@ the task emitted.
 
 The `@with_context` and `@with_change_reason` decorators (and
 `@audit_task`) auto-detect `async def` targets via
-`asyncio.iscoroutinefunction`. A naive sync wrapper would close
+`inspect.iscoroutinefunction`. A naive sync wrapper would close
 the context **before** the coroutine is awaited, silently dropping
 all metadata from the events the task writes. The async wrappers
 keep the `auditrum_context` / `use_change_reason` block open across

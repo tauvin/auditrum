@@ -1,4 +1,4 @@
-import asyncio
+import inspect
 import re
 from collections.abc import Callable
 from contextlib import contextmanager
@@ -182,7 +182,7 @@ audit_context = AuditContext()
 def with_context(**kwargs):
     """Decorator that wraps the call in an :meth:`AuditContext.use` block.
 
-    Detects ``async def`` targets via :func:`asyncio.iscoroutinefunction`
+    Detects ``async def`` targets via :func:`inspect.iscoroutinefunction`
     and returns an ``async`` wrapper in that case — a plain ``def``
     wrapper would close the context *before* the coroutine is awaited,
     silently dropping the metadata from every audit event emitted by
@@ -190,7 +190,7 @@ def with_context(**kwargs):
     """
 
     def decorator(func: Callable):
-        if asyncio.iscoroutinefunction(func):
+        if inspect.iscoroutinefunction(func):
 
             @wraps(func)
             async def awrapper(*args, **fkwargs):
@@ -217,7 +217,7 @@ def with_change_reason(reason: str):
     """
 
     def decorator(func: Callable):
-        if asyncio.iscoroutinefunction(func):
+        if inspect.iscoroutinefunction(func):
 
             @wraps(func)
             async def awrapper(*args, **kwargs):

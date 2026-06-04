@@ -12,7 +12,7 @@ all behave exactly like they do for a real request.
 
 from __future__ import annotations
 
-import asyncio
+import inspect
 from collections.abc import Callable
 from functools import wraps
 from typing import Any
@@ -52,7 +52,7 @@ def audit_task(*, source: str = "task", **metadata: Any):
     """
 
     def decorator(func: Callable) -> Callable:
-        if asyncio.iscoroutinefunction(func):
+        if inspect.iscoroutinefunction(func):
 
             @wraps(func)
             async def awrapper(*args: Any, **kwargs: Any) -> Any:
@@ -84,6 +84,7 @@ def install_celery_signals(*, source: str = "celery") -> None:
 
         # celery_config.py
         from auditrum.integrations.django.tasks import install_celery_signals
+
         install_celery_signals()
 
     Call this once at application startup. Calling it multiple times
