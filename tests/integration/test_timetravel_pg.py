@@ -17,9 +17,7 @@ def sample_users(fresh_auditlog):
     conn = fresh_auditlog
     with conn.cursor() as cur:
         cur.execute("DROP TABLE IF EXISTS tt_users CASCADE")
-        cur.execute(
-            "CREATE TABLE tt_users (id serial PRIMARY KEY, name text, email text)"
-        )
+        cur.execute("CREATE TABLE tt_users (id serial PRIMARY KEY, name text, email text)")
         cur.execute(generate_trigger_sql("tt_users"))
     yield conn
     with conn.cursor() as cur:
@@ -38,15 +36,8 @@ class TestReconstructRow:
         before = _now(conn)
         sleep(0.05)
         with conn.cursor() as cur:
-            cur.execute(
-                "INSERT INTO tt_users (name, email) VALUES ('alice', 'a@x.com')"
-            )
-        assert (
-            reconstruct_row(
-                conn, table="tt_users", object_id="1", at=before
-            )
-            is None
-        )
+            cur.execute("INSERT INTO tt_users (name, email) VALUES ('alice', 'a@x.com')")
+        assert reconstruct_row(conn, table="tt_users", object_id="1", at=before) is None
 
     def test_returns_state_between_inserts_and_updates(self, sample_users):
         conn = sample_users
@@ -58,36 +49,23 @@ class TestReconstructRow:
         after_insert = _now(conn)
         sleep(0.05)
         with conn.cursor() as cur:
-            cur.execute(
-                "UPDATE tt_users SET email = 'a2@x.com' WHERE id = %s", (uid,)
-            )
+            cur.execute("UPDATE tt_users SET email = 'a2@x.com' WHERE id = %s", (uid,))
         after_update = _now(conn)
 
-        before_state = reconstruct_row(
-            conn, table="tt_users", object_id=str(uid), at=after_insert
-        )
-        after_state = reconstruct_row(
-            conn, table="tt_users", object_id=str(uid), at=after_update
-        )
+        before_state = reconstruct_row(conn, table="tt_users", object_id=str(uid), at=after_insert)
+        after_state = reconstruct_row(conn, table="tt_users", object_id=str(uid), at=after_update)
         assert before_state["email"] == "a@x.com"
         assert after_state["email"] == "a2@x.com"
 
     def test_returns_none_after_delete(self, sample_users):
         conn = sample_users
         with conn.cursor() as cur:
-            cur.execute(
-                "INSERT INTO tt_users (name, email) VALUES ('bob', 'b@x.com') RETURNING id"
-            )
+            cur.execute("INSERT INTO tt_users (name, email) VALUES ('bob', 'b@x.com') RETURNING id")
             uid = cur.fetchone()[0]
             cur.execute("DELETE FROM tt_users WHERE id = %s", (uid,))
         after_delete = _now(conn)
 
-        assert (
-            reconstruct_row(
-                conn, table="tt_users", object_id=str(uid), at=after_delete
-            )
-            is None
-        )
+        assert reconstruct_row(conn, table="tt_users", object_id=str(uid), at=after_delete) is None
 
     def test_recreation_returns_new_state(self, sample_users):
         conn = sample_users
@@ -103,9 +81,7 @@ class TestReconstructRow:
                 (uid,),
             )
         after_recreate = _now(conn)
-        state = reconstruct_row(
-            conn, table="tt_users", object_id=str(uid), at=after_recreate
-        )
+        state = reconstruct_row(conn, table="tt_users", object_id=str(uid), at=after_recreate)
         assert state["email"] == "c2@x.com"
         assert state["name"] == "carol2"
 
@@ -132,19 +108,32 @@ class TestReconstructTable:
 
         # At 'before_second' only 'old' existed
         names = sorted(
-            r["name"]
-            for _, r in reconstruct_table(conn, table="tt_users", at=before_second)
+            r["name"] for _, r in reconstruct_table(conn, table="tt_users", at=before_second)
         )
         assert names == ["old"]
+
+    def test_stream_mode_on_autocommit_connection(self, sample_users):
+        # Regression for #13: stream=True opens a server-side named cursor
+        # (DECLARE CURSOR), which must run inside a transaction. The pg_conn
+        # fixture is autocommit; before the fix this raised
+        # ``NoActiveSqlTransaction``. reconstruct_table now opens a
+        # transaction for the stream when the connection is in autocommit
+        # mode, so it just works.
+        conn = sample_users
+        with conn.cursor() as cur:
+            cur.execute("INSERT INTO tt_users (name) VALUES ('a'), ('b'), ('c')")
+            cur.execute("DELETE FROM tt_users WHERE name = 'b'")
+        at = _now(conn)
+        result = dict(reconstruct_table(conn, table="tt_users", at=at, stream=True))
+        names = sorted(r["name"] for r in result.values())
+        assert names == ["a", "c"]
 
 
 class TestReconstructFieldHistory:
     def test_full_timeline(self, sample_users):
         conn = sample_users
         with conn.cursor() as cur:
-            cur.execute(
-                "INSERT INTO tt_users (name, email) VALUES ('a', 'a1@x.com') RETURNING id"
-            )
+            cur.execute("INSERT INTO tt_users (name, email) VALUES ('a', 'a1@x.com') RETURNING id")
             uid = cur.fetchone()[0]
             cur.execute("UPDATE tt_users SET email = 'a2@x.com' WHERE id = %s", (uid,))
             cur.execute("UPDATE tt_users SET name = 'a_renamed' WHERE id = %s", (uid,))
@@ -159,9 +148,7 @@ class TestReconstructFieldHistory:
     def test_delete_closes_timeline(self, sample_users):
         conn = sample_users
         with conn.cursor() as cur:
-            cur.execute(
-                "INSERT INTO tt_users (name, email) VALUES ('z', 'z@x.com') RETURNING id"
-            )
+            cur.execute("INSERT INTO tt_users (name, email) VALUES ('z', 'z@x.com') RETURNING id")
             uid = cur.fetchone()[0]
             cur.execute("DELETE FROM tt_users WHERE id = %s", (uid,))
 
