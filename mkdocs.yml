@@ -25,6 +25,7 @@ nav:
   - Reference:
       - Architecture: architecture.md
       - API stability: api-stability.md
+      - API reference: reference/api.md
       - Performance: performance.md
       - Performance tuning: performance-tuning.md
       - Migration cookbook: migration-cookbook.md
@@ -76,15 +77,21 @@ plugins:
       handlers:
         python:
           options:
+            # The codebase documents with prose docstrings carrying
+            # inline Sphinx cross-reference roles (``:func:``, ``:class:``);
+            # parse them as Sphinx so any field lists are read correctly.
+            docstring_style: sphinx
+            # Public surface only: ``__all__`` plus this underscore filter
+            # keeps the render to what ``api-stability.md`` calls public.
+            filters: ["!^_"]
+            members_order: source
+            heading_level: 3
             show_root_heading: true
             show_source: true
-            docstring_style: google
-            docstring_section_style: table
-            members_order: source
-            merge_init_into_class: true
+            show_if_no_docstring: false
             separate_signature: true
             show_signature_annotations: true
-            signature_crossrefs: true
+            merge_init_into_class: true
 
 markdown_extensions:
   - admonition
