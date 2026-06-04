@@ -54,7 +54,7 @@ Common patterns:
 | Skip internal-system-user changes     | ``current_setting('auditrum.context_metadata', true)::jsonb->>'source' <> 'system'`` |
 
 `log_condition` is **trusted input** — never interpolate user data.
-See [concepts.md](concepts.md#tracking-primitives).
+See [concepts.md](concepts.md#trackspec-what-to-audit).
 
 ## 3. Use ``FieldFilter.only`` instead of many ``extra_meta``
 
@@ -151,7 +151,7 @@ GIN (diff)`` by default. On the two production deployments we have real
 numbers for, that index recorded **0 scans** while costing **700–860 MB
 per monthly partition** — and it's re-maintained on *every* audited
 write, so it's pure write tax plus disk for those workloads. See the
-measured figures in [Performance → Index footprint](performance.md#index-footprint--a-tuning-finding).
+measured figures in [Performance → Index footprint](performance.md#index-footprint-a-tuning-finding).
 
 ### When it helps vs. when it doesn't
 

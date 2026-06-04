@@ -21,7 +21,7 @@ can read it directly on GitHub without building anything.
   `auditrum_makemigrations`, middleware, ORM helpers, admin integration.
 - **[SQLAlchemy integration](sqlalchemy.md)** — `track_table`,
   `bootstrap_schema`, `sync`, Alembic integration.
-- **[Raw psycopg](getting-started.md#option-3-raw-psycopg--any-other-framework)**
+- **[Raw psycopg](getting-started.md#option-3-raw-psycopg-any-other-framework)**
   — plain psycopg connections with `TriggerManager` directly.
 
 ## Features
@@ -44,7 +44,7 @@ can read it directly on GitHub without building anything.
 ## Getting help
 
 - Issues and feature requests: [github.com/tauvin/auditrum/issues](https://github.com/tauvin/auditrum/issues)
-- Changelog: [CHANGELOG.md](../CHANGELOG.md)
+- Changelog: [CHANGELOG.md](changelog.md)
 
 ## Conventions in this doc
 
