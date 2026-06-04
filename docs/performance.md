@@ -25,6 +25,7 @@ Three hot paths, three benchmark files:
 | Trigger overhead     | ``benchmarks/test_trigger_overhead.py``       | µs / op     | Marginal cost of auditrum on your write path. Report as (tracked − untracked).    |
 | Hash chain write     | ``benchmarks/test_hash_chain.py``             | µs / op     | The ceiling the advisory lock imposes on insert throughput.                       |
 | Time-travel latency  | ``benchmarks/test_time_travel.py``            | µs / op     | Reconstruction speed at N events of history.                                      |
+| Streaming memory     | ``benchmarks/test_stream_memory.py``          | MB (peak)   | Peak Python heap of ``reconstruct_table(stream=True)`` vs the materialised path.  |
 
 All three use ``pytest-benchmark`` with a fresh testcontainer
 Postgres per session. Measurements include the Python ↔ Postgres
@@ -225,13 +226,39 @@ used; if it regressed we'd catch it there.
 
 ``reconstruct_table(engine, table='…', at=…, stream=True)`` uses a
 server-side named cursor. Expected memory footprint: bounded by
-Python's cursor buffer, independent of result set size.
+Python's cursor buffer (``batch_size`` rows in flight), independent of
+result set size. The default (``stream=False``) path does
+``fetchall()`` and so its peak grows ~linearly with the number of
+surviving rows.
 
-Planned measurement: 10M-row audit log, iterate all surviving rows
-at a target timestamp, track RSS growth with ``tracemalloc`` +
-``resource.getrusage()``. Catalog's ``auditlog`` is now ~7.2M events,
-within reach of a meaningful run — this is the next catalog number to
-land here.
+``benchmarks/test_stream_memory.py`` measures this: it populates
+``auditlog`` with one INSERT event per ``object_id`` (all alive at the
+target timestamp), then compares the peak Python allocation
+(``tracemalloc``) of iterating the streaming generator row-by-row —
+never building a list — against materialising the default path into a
+list. It also records a secondary ``resource.getrusage().ru_maxrss``
+delta for reference.
+
+**How to run**
+
+```bash
+# default ROWS=50_000, runs in CI/dev time
+uv run pytest benchmarks/test_stream_memory.py -s
+
+# crank it up on real hardware (e.g. 5M surviving rows)
+AUDITRUM_STREAM_BENCH_ROWS=5000000 uv run pytest benchmarks/test_stream_memory.py -s
+```
+
+The test asserts the streaming peak is a small fraction of the
+materialised peak (a tolerant guard, not an exact number — it is a
+benchmark). The streaming peak stays flat as ``ROWS`` grows; the
+materialised peak scales with it.
+
+Reference hardware (Apple Silicon, Postgres 16-alpine in Docker,
+50k surviving rows, ``batch_size=1000``): ``tracemalloc`` peak
+**1.4 MB streaming vs 38.6 MB materialised** (ratio ≈ 0.04);
+``ru_maxrss`` delta **+3.7 MB vs +111.6 MB**. The catalog-scale run
+(~7M events) is still the next real number to land here.
 
 ## CI matrix
 
