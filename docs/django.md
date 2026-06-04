@@ -400,6 +400,52 @@ downstream teams hit pks set to the context UUID string (see
 CHANGELOG entry on the eridan-catalog report) — that's fixed
 transparently from 0.4.3 onward.
 
+## Hash chain (tamper-evidence)
+
+The hash chain makes the audit log tamper-evident: every new row is
+SHA-256-hashed together with a pointer to the previous row, so any
+post-hoc edit, reorder, or deletion in the middle of the log breaks the
+chain and becomes detectable. It detects tampering — it does not prevent
+it; pair it with [hardening](hardening.md) `REVOKE`s so the app role
+can't write to `auditlog` directly in the first place.
+
+It is **opt-in** because chaining serialises inserts behind a per-table
+advisory lock (write-throughput cost), so it's not wired into a
+migration. Enable it explicitly once, on the existing audit log:
+
+```bash
+# Preview the DDL
+python manage.py auditrum_enable_hash_chain --dry-run
+
+# Enable (idempotent — safe to re-run)
+python manage.py auditrum_enable_hash_chain
+```
+
+Set `PGAUDIT_HASH_CHAIN = True` in settings so the flag reflects reality
+(the enable command warns if you run the DDL while it's still `False`).
+The setting is advisory — it documents intent and does not itself run any
+DDL.
+
+Verify integrity on a schedule (the command exits non-zero when the
+chain is broken, so it works as a cron / monitoring alarm):
+
+```bash
+python manage.py auditrum_verify_chain
+# e.g. as a cron entry:
+# 0 * * * * cd /srv/app && python manage.py auditrum_verify_chain
+```
+
+**Operational must — anchor the tip externally.** A window-function
+verify alone cannot detect deletion of the *most recent* rows (there's
+no surviving neighbour to mismatch against), and a database superuser
+could in principle rewrite the entire chain and re-hash it. To close both
+gaps, periodically capture the chain tip with `get_chain_tip(...)` and
+store it **outside** the database — S3 with Object Lock, a WORM store, or
+even a printout — then feed it back via `verify_chain(..., expected_tip=)`
+on the next run. `auditrum_verify_chain` prints the current tip on every
+run for exactly this purpose. See [hardening](hardening.md) for the full
+threat model.
+
 ## Tips and gotchas
 
 - **Tracked models must have a `pk`.** Composite primary keys are not

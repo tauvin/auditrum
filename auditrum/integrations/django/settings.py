@@ -16,9 +16,7 @@ _GUC_NAME_RE = re.compile(r"^[a-z_][a-z0-9_]*\.[a-z_][a-z0-9_]*$")
 
 def _validate_guc_name(value: str, label: str) -> str:
     if not isinstance(value, str) or not _GUC_NAME_RE.match(value):
-        raise ValueError(
-            f"Invalid {label}: {value!r} (must match {_GUC_NAME_RE.pattern})"
-        )
+        raise ValueError(f"Invalid {label}: {value!r} (must match {_GUC_NAME_RE.pattern})")
     return value
 
 
@@ -48,8 +46,9 @@ class AuditSettings:
     @property
     def middleware_methods(self) -> tuple:
         return tuple(
-            getattr(settings, "PGAUDIT_MIDDLEWARE_METHODS",
-                    ("GET", "POST", "PUT", "PATCH", "DELETE"))
+            getattr(
+                settings, "PGAUDIT_MIDDLEWARE_METHODS", ("GET", "POST", "PUT", "PATCH", "DELETE")
+            )
         )
 
     @property
@@ -64,6 +63,19 @@ class AuditSettings:
         compliance reason to keep the raw value.
         """
         return getattr(settings, "PGAUDIT_HASH_SESSION_KEY", True)
+
+    @property
+    def hash_chain(self) -> bool:
+        """Whether the tamper-evidence hash chain is in use on the audit log.
+
+        Default ``False``. This flag is advisory — it documents intent and
+        is consulted by the ``auditrum_enable_hash_chain`` command (which
+        warns if you enable the DDL while the flag is off). It does **not**
+        auto-run any DDL: the chain adds write-serialisation overhead (a
+        per-table advisory lock on insert), so enabling it is an explicit
+        operator action via ``python manage.py auditrum_enable_hash_chain``.
+        """
+        return getattr(settings, "PGAUDIT_HASH_CHAIN", False)
 
     @property
     def redact_user_agent(self) -> bool:
