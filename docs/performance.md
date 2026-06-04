@@ -286,7 +286,7 @@ Once auditrum is live:
   ``(table, operation)`` rates and per-table trigger duration
   histograms.
 * Grafana dashboard JSON in
-  [``examples/grafana/``](../examples/grafana/) renders those as the
+  [``examples/grafana/``](https://github.com/tauvin/auditrum/tree/main/examples/grafana) renders those as the
   three most common operational questions: "are events flowing?",
   "is trigger latency OK?", "is the chain intact?".
 * Hash chain verification runs as a scheduled job

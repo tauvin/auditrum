@@ -256,8 +256,8 @@ The verification query is **server-side recomputation** (not Python
 re-implementation), so it's byte-perfect with the trigger's hashing
 behaviour — no drift between the Python verifier and the PL/pgSQL
 trigger. Details in
-[`auditrum/hash_chain.py`](../auditrum/hash_chain.py) and
-[`tests/integration/test_hardening_pg.py`](../tests/integration/test_hardening_pg.py).
+[`auditrum/hash_chain.py`](https://github.com/tauvin/auditrum/blob/main/auditrum/hash_chain.py) and
+[`tests/integration/test_hardening_pg.py`](https://github.com/tauvin/auditrum/blob/main/tests/integration/test_hardening_pg.py).
 
 ### Hash chain does **not** prevent tampering
 
@@ -329,7 +329,7 @@ safety margin before month roll-over.)
 auditrum does **not** currently ship a subject-level
 pseudonymization/erasure tool — the tension between "tamper-evident
 hash chain" and "GDPR erasure" is real and requires careful design
-(see the discussion in [CHANGELOG.md](../CHANGELOG.md#unreleased)).
+(see the discussion in [CHANGELOG.md](changelog.md)).
 
 Practical short-term approaches:
 
