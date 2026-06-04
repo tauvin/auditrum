@@ -306,6 +306,160 @@ recipe. Key targets in the auditrum schema:
 * ``audit_context.metadata`` — per-request/job blob (``source``,
   ``user_id``, ``request_id``, …).
 
+## Recipe 5 — Removing a legacy in-house audit trigger
+
+A variant of Recipe 4, but the failure mode is subtler: you adopted
+auditrum, marked your models with ``@track``, and the new ``auditlog``
+is filling up correctly — but an **older home-grown audit trigger,
+predating auditrum**, is still firing on the same tables. It writes to
+a *separate* legacy table (we hit this with a ``common_auditlog``), so
+every audited write now pays for **two** triggers and lands two rows.
+Nothing is broken, so it's easy to miss; you just silently doubled the
+write overhead.
+
+### Step 1 — Detect the double-fire
+
+The cheap signal is in the query plan. Run an ``EXPLAIN (ANALYZE)`` of
+a representative mutation inside a transaction you roll back:
+
+```sql
+BEGIN;
+EXPLAIN (ANALYZE) UPDATE myapp_order SET status = status WHERE id = 1;
+ROLLBACK;
+```
+
+A single auditrum trigger shows one ``Trigger ...`` line. If you see
+**two** ``Trigger`` lines on a tracked table, something else is firing
+alongside auditrum:
+
+```text
+Trigger audit_myapp_order_trigger: time=1.41 calls=1
+Trigger myapp_order_audit_trigger: time=1.83 calls=1   <- the legacy one
+```
+
+To enumerate every audit-ish trigger across the schema:
+
+```sql
+SELECT c.relname, t.tgname
+FROM pg_trigger t
+JOIN pg_class c ON c.oid = t.tgrelid
+WHERE NOT t.tgisinternal AND t.tgname LIKE '%audit%'
+ORDER BY 1, 2;
+```
+
+auditrum's triggers are uniformly named ``audit_<table>_trigger``;
+anything that doesn't match that shape is a candidate. Inspect where a
+suspect trigger writes by dumping its function body:
+
+```sql
+SELECT t.tgname, pg_get_functiondef(t.tgfoid)
+FROM pg_trigger t
+WHERE t.tgname = 'myapp_order_audit_trigger';
+```
+
+The ``INSERT INTO common_auditlog ...`` (or whatever target) inside
+the function body confirms it's the legacy path.
+
+### Step 2 — Decide what to keep
+
+Drop the legacy **triggers and their functions** — those are the
+write-path tax. The legacy **table** is a separate decision. If it
+holds history that predates your auditrum install, keep it as a frozen
+archive rather than dropping it. Check the coverage overlap:
+
+```sql
+SELECT min(changed_at) FROM auditlog;          -- auditrum's earliest row
+SELECT min(created_at)  FROM common_auditlog;   -- legacy's earliest row
+```
+
+If the legacy ``min()`` is older than auditrum's, the legacy table is
+your only record of that earlier window — freeze it, don't drop it.
+Stopping the triggers stops *new* writes; the existing rows stay
+queryable.
+
+### Step 3 — Grep the app before you touch anything
+
+Reads of the legacy table will keep working after you drop its
+triggers — the table itself stays. But confirm nothing depends on it
+*continuing to receive new rows* (a report that joins recent
+``common_auditlog`` activity, a reconciliation job, a dashboard):
+
+```bash
+rg -n "common_auditlog" --type py --type sql
+```
+
+If a live reader needs fresh data, migrate it to auditrum's
+``auditlog`` first. Only once new writes to the legacy table are
+genuinely unread should you proceed.
+
+### Step 4 — The migration to drop them safely
+
+Drop the legacy triggers and functions in one idempotent migration.
+The key is to scope the drop by the legacy naming pattern **without**
+matching auditrum's own triggers. The two patterns are distinct —
+auditrum uses ``audit_<table>_trigger`` (prefix), the legacy setup here
+used ``<table>_audit_trigger`` (suffix) — but verify the match list on
+staging before you run anything destructive:
+
+```sql
+-- Dry run: list exactly what the migration will drop.
+-- Must NOT contain any 'audit_<table>_trigger' (auditrum) rows —
+-- those don't end in '_audit_trigger', so the LIKE skips them.
+SELECT c.relname, t.tgname
+FROM pg_trigger t
+JOIN pg_class c ON c.oid = t.tgrelid
+WHERE NOT t.tgisinternal AND t.tgname LIKE '%\_audit\_trigger'
+ORDER BY 1, 2;
+```
+
+Eyeball that list. Once it contains only legacy triggers, the
+migration is a ``DO`` block that drops each trigger and then its
+function, ``IF EXISTS`` throughout so it's re-runnable:
+
+```python
+# myapp/migrations/0050_drop_legacy_audit_triggers.py
+from django.db import migrations
+
+DROP_LEGACY = r"""
+DO $$
+DECLARE
+    r record;
+BEGIN
+    FOR r IN
+        SELECT c.relname AS tbl, t.tgname AS trg, t.tgfoid::regprocedure AS fn
+        FROM pg_trigger t
+        JOIN pg_class c ON c.oid = t.tgrelid
+        WHERE NOT t.tgisinternal
+          AND t.tgname LIKE '%\_audit\_trigger'   -- legacy suffix, not auditrum's prefix
+    LOOP
+        EXECUTE format('DROP TRIGGER IF EXISTS %I ON %I', r.trg, r.tbl);
+        EXECUTE format('DROP FUNCTION IF EXISTS %s', r.fn);
+    END LOOP;
+END $$;
+"""
+
+
+class Migration(migrations.Migration):
+    dependencies = [("myapp", "0049_auditrum_install")]
+    operations = [
+        migrations.RunSQL(
+            sql=DROP_LEGACY,
+            # The legacy trigger DDL isn't ours to recreate; leave reverse a no-op.
+            reverse_sql="-- legacy triggers intentionally not restored",
+        ),
+    ]
+```
+
+Run it on staging first, re-run the Step 1 ``EXPLAIN (ANALYZE)`` there,
+and confirm exactly one ``Trigger`` line remains before promoting to
+production. Because it's idempotent, a second apply is a no-op.
+
+A note on partitioning: this is unrelated to auditrum's partitioned
+``auditlog``. The legacy triggers live on the **tracked tables**
+(``myapp_order`` and friends), not on the partitioned audit log, so
+there's no parent/partition trigger-propagation subtlety to worry
+about here.
+
 ## Things to check after any migration
 
 1. **Trigger presence.** ``auditrum status`` lists all installed
