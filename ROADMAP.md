@@ -459,16 +459,20 @@ These are decisions that affect roadmap shape but haven't been made:
    Pages. Same repo, no external service to manage, deploy via
    ``mkdocs gh-deploy`` in a release workflow. Revisit only if the
    docs outgrow what GH Pages can comfortably serve.
-4. **LTS line cadence.** Promise to backport bug fixes to ``1.x`` for
-   12 months, 18 months, or "as needed"? Decide before 1.0
-   announcement.
+4. ~~**LTS line cadence.**~~ **Resolved 2026-06-04:** 12 months. Bug
+   fixes get backported to the latest ``1.x`` line for 12 months after
+   a minor ships. Concrete — unlike "as needed", which would hollow out
+   the LTS promise — and sustainable at a part-time solo pace (18 months
+   is too heavy to hold). Matches the "at least 12 months" wording
+   already in the 1.0.0 section.
 5. **GDPR pseudonymization timing — pre-1.0 or 1.3?** Currently in
    1.3. If catalog has a regulatory deadline that needs it sooner,
    it could move into 0.5 or 0.6. **Need catalog's compliance team
    to confirm whether they need it before 1.0.**
-6. **SQLAlchemy "experimental" status in 1.0.** The current
-   ``auditrum.integrations.sqlalchemy`` works but lacks
-   Alembic-autogenerate parity. Two framings: ship it as
-   ``experimental: API may change`` so 1.1 can clean it up, or
-   remove it from 1.0 entirely so the 1.0 release is purely
-   Django-focused. Decide before 0.7 RC.
+6. ~~**SQLAlchemy "experimental" status in 1.0.**~~ **Resolved
+   2026-06-04:** ship it as ``experimental`` in ``__all__`` (API may
+   change), with 1.1 promoting it to first-class + Alembic-autogenerate
+   parity. Removing it from 1.0 and re-adding in 1.1 would be more churn
+   and read as abandonment; the experimental label keeps the code in the
+   tree while leaving 1.1 free to clean it up. Matches the 1.0 scope
+   (Django first-class, SQLAlchemy experimental).
