@@ -20,6 +20,7 @@ nav:
       - Time travel: time-travel.md
       - Hardening: hardening.md
       - Observability: observability.md
+      - Production deployment: deployment.md
       - blame CLI: blame.md
       - CLI reference: cli.md
   - Reference:
