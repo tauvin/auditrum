@@ -8,6 +8,10 @@ the API stabilises.
 
 ## [Unreleased]
 
+Nothing yet.
+
+## [0.5.0] — 2026-06-04
+
 ### Added
 
 - **First-class hash-chain ergonomics for the Django integration.** The
