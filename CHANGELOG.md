@@ -8,6 +8,31 @@ the API stabilises.
 
 ## [Unreleased]
 
+### Added
+
+- **First-class hash-chain ergonomics for the Django integration.** The
+  tamper-evidence hash chain was previously only reachable by running the
+  raw ``generate_hash_chain_sql()`` output by hand. Three additions make
+  it conventional:
+  - **``PGAUDIT_HASH_CHAIN`` setting** (default ``False``), surfaced as
+    ``audit_settings.hash_chain``. Advisory only — it documents intent and
+    is consulted by the enable command; it never auto-runs DDL, because
+    chaining serialises inserts behind a per-table advisory lock and so
+    must stay an explicit opt-in.
+  - **``auditrum_enable_hash_chain`` management command.** Runs
+    ``generate_hash_chain_sql(audit_settings.table_name)`` against the
+    configured database to enable chaining on the existing audit log.
+    Idempotent (``IF NOT EXISTS`` / ``CREATE OR REPLACE``), supports
+    ``--dry-run`` to print the SQL without executing, and warns if
+    ``PGAUDIT_HASH_CHAIN`` is ``False`` while still proceeding.
+  - **``auditrum_verify_chain`` management command.** Runs
+    ``verify_chain`` against the configured table, prints the current
+    chain tip (for external anchoring) and an intact/broken summary, and
+    exits non-zero when the chain is broken so it drops straight into cron
+    or monitoring. ``--expected-tip-json`` feeds a previously-captured tip
+    back as ``verify_chain``'s ``expected_tip=`` anchor (inline JSON or a
+    path to a JSON file), closing the tail-row-deletion gap from cron.
+
 ### Changed
 
 - **The ``diff`` GIN index is now opt-in (default off).** auditrum

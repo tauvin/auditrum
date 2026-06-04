@@ -65,6 +65,19 @@ class AuditSettings:
         return getattr(settings, "PGAUDIT_HASH_SESSION_KEY", True)
 
     @property
+    def hash_chain(self) -> bool:
+        """Whether the tamper-evidence hash chain is in use on the audit log.
+
+        Default ``False``. This flag is advisory — it documents intent and
+        is consulted by the ``auditrum_enable_hash_chain`` command (which
+        warns if you enable the DDL while the flag is off). It does **not**
+        auto-run any DDL: the chain adds write-serialisation overhead (a
+        per-table advisory lock on insert), so enabling it is an explicit
+        operator action via ``python manage.py auditrum_enable_hash_chain``.
+        """
+        return getattr(settings, "PGAUDIT_HASH_CHAIN", False)
+
+    @property
     def diff_gin_index(self) -> bool:
         """Whether to create a GIN index on the audit log ``diff`` column.
 
