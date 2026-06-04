@@ -48,7 +48,8 @@ be true:
 ## First production users — already onboarding
 
 The library is being adopted at the same company that owns
-**catalog** (an auction platform with a ~1M-row ``bids`` table) plus a
+**catalog** (an auction catalog with high-churn ``item`` and ``sale``
+tables — ~7M audit events in pre-prod) plus a
 few sister projects. Integration starts on **0.3.1** — they are the
 real-world feedback loop for the entire pre-1.0 cycle, not a
 "find users" milestone we worry about at the end.
@@ -191,7 +192,7 @@ support matrix before 1.0 makes a public commitment to it.
   - ``sync()`` throughput with N specs and warm tracking table.
   - Composite index performance on a multi-million-row audit log.
 - [ ] **Numbers published in README and docs.** "Catalog observed X%
-  trigger overhead at Y bids/second on PG 16 with 8GB
+  trigger overhead at Y writes/second on PG 17 with 8GB
   ``shared_buffers``" is the level of specificity we want. Methodology
   in ``docs/performance.md`` so users can reproduce on their own
   hardware.
