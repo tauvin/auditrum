@@ -4,9 +4,17 @@ This page documents **how** we measure auditrum's performance and
 **what the numbers mean** — so a reader can either trust the
 published figures below or reproduce them on their own hardware.
 
-> **Numbers below are placeholders.** They land once catalog's
-> production workload has run on 0.4 for a full retention window.
-> See the _"What you can do right now"_ section for the methodology.
+> **The figures below are preliminary reference-hardware numbers**,
+> not production data. They come from a single benchmark run on an
+> Apple M3 Pro under Docker Desktop (PostgreSQL 16-alpine in a
+> testcontainer, Python 3.13, psycopg 3.3). They establish
+> order-of-magnitude overhead only — Docker Desktop's macOS VM
+> inflates absolute timings, and some operations (DELETE, the
+> no-chain INSERT baseline) showed high run-to-run variance. They
+> will be replaced by catalog's production numbers once its workload
+> has run on a real server for a full retention window. **Trust the
+> deltas, not the absolute µs**, and reproduce on your own hardware
+> with the commands below.
 
 ## How we measure
 
@@ -40,18 +48,35 @@ uv run pytest benchmarks/ --benchmark-only \
     --benchmark-compare-fail=mean:20%
 ```
 
-## What the numbers will say (skeleton)
+## Preliminary numbers (reference hardware)
 
-Once catalog numbers land, this section fills in with a table per
-workload. The skeleton below is what the shape looks like.
+The tables below are the first measured pass — single run, Apple M3
+Pro, Docker Desktop, PostgreSQL 16-alpine, Python 3.13, psycopg 3.3.
+Values are **medians** (more robust than the mean against the VM's
+jitter). Cells marked **—** have no benchmark yet; rows sourced from
+catalog load tests are called out as such. Catalog production numbers
+will supersede these.
 
-### Trigger overhead (PG 16, Python 3.13, Django 5.1)
+### Trigger overhead (PG 16-alpine, Python 3.13, psycopg 3.3 — Apple M3 Pro / Docker Desktop)
+
+Overhead is the marginal cost over the untracked baseline (median µs;
+percent is relative to that row's baseline).
 
 | Operation | Untracked (baseline) | ``FieldFilter.all()`` | ``FieldFilter.only(*2)`` | ``log_condition`` short-circuit |
 |-----------|----------------------|-----------------------|--------------------------|---------------------------------|
-| INSERT    | _tbd_ µs             | _tbd_ µs (+_X_%)      | _tbd_ µs (+_Y_%)         | _tbd_ µs (+_Z_%)                 |
-| UPDATE    | _tbd_ µs             | _tbd_ µs (+_X_%)      | _tbd_ µs (+_Y_%)         | _tbd_ µs (+_Z_%)                 |
-| DELETE    | _tbd_ µs             | _tbd_ µs (+_X_%)      | _tbd_ µs (+_Y_%)         | n/a                             |
+| INSERT    | 159 µs               | 232 µs (+46%)         | 226 µs (+42%)            | —                               |
+| UPDATE    | 183 µs               | 205 µs (+12%)         | —                        | 193 µs (+6%)                    |
+| DELETE    | 363 µs               | 474 µs (+31%)¹        | —                        | n/a                             |
+
+¹ DELETE showed high variance on this run (stddev ≈ median); treat
+the +31% as indicative only until a quieter / bare-metal rerun.
+
+Two honest caveats from this dataset: (1) ``FieldFilter.only(*2)``
+barely beats ``.all()`` on INSERT here because the benchmark table has
+only three columns — the filter saves little until the tracked row is
+wide (catalog's tables are). (2) The absolute baselines (e.g. DELETE
+at 363 µs) are inflated by Docker Desktop's macOS VM; on bare-metal
+Linux they drop substantially, but the *deltas* are what transfer.
 
 What we expect to see, qualitatively: INSERTs and DELETEs pay a
 constant cost per row; UPDATEs pay that plus a ``jsonb_diff`` step
@@ -61,12 +86,16 @@ entry, not a full trigger body execution.
 
 ### Hash chain ceiling (PG 16, single writer)
 
-| Scenario                           | µs / insert | ops / sec |
-|------------------------------------|-------------|-----------|
-| Audited, chain disabled             | _tbd_       | _tbd_     |
-| Audited, chain enabled (uncontended) | _tbd_      | _tbd_     |
-| Audited, chain enabled, 4 writers   | _tbd_       | _tbd_     |
-| Audited, chain enabled, 16 writers  | _tbd_       | _tbd_     |
+| Scenario                            | µs / insert | ops / sec    |
+|-------------------------------------|-------------|--------------|
+| Audited, chain disabled             | 294 µs²     | ~3,400       |
+| Audited, chain enabled (uncontended)| 322 µs      | ~3,100       |
+| Audited, chain enabled, 4 writers   | — (catalog load test) | —  |
+| Audited, chain enabled, 16 writers  | — (catalog load test) | —  |
+
+² The chain-disabled baseline was the noisiest run in the whole suite
+(stddev > median); the ~28 µs delta the advisory lock adds is the
+takeaway, not the absolute. ops/sec is derived from the median.
 
 The concurrency rows come from catalog load tests, not the
 microbenchmark suite — the single-writer number from
@@ -76,10 +105,15 @@ microbenchmark suite — the single-writer number from
 
 | Call                                      | µs / op |
 |-------------------------------------------|---------|
-| ``reconstruct_row(at=latest)``            | _tbd_   |
-| ``reconstruct_row(at=halfway)``           | _tbd_   |
-| ``reconstruct_row(at=earliest)``          | _tbd_   |
-| ``reconstruct_field_history('field')``    | _tbd_   |
+| ``reconstruct_row(at=latest)``            | 225 µs  |
+| ``reconstruct_row(at=halfway)``           | —       |
+| ``reconstruct_row(at=earliest)``          | —       |
+| ``reconstruct_field_history('field')``    | 702 µs  |
+
+Measured on the 100-UPDATE history fixture
+(``benchmarks/test_time_travel.py``). The ``at=halfway`` /
+``at=earliest`` rows aren't benchmarked yet — only the latest-revision
+read and the full field history are.
 
 Latency scales linearly in history depth — the composite
 ``(table_name, object_id, changed_at DESC)`` index is what keeps
@@ -105,14 +139,15 @@ See ``.github/workflows/ci.yml``:
 | Axis         | Cells                              |
 |--------------|------------------------------------|
 | PostgreSQL   | 13, 14, 15, 16, 17                 |
-| Python       | 3.11, 3.12, 3.13                    |
-| Django       | 4.2 LTS, 5.1                       |
+| Python       | 3.11, 3.12, 3.13, 3.14             |
+| Django       | 4.2 LTS, 5.2 LTS, 6.0             |
 
-The matrix is slimmed to ~6 cells along a diagonal plus
-full-PG-coverage for the newest Python/Django pair — running the
-full 30-cell cartesian product is expensive for a library that
-mostly interacts with Postgres through the same ``psycopg``
-interface on every cell.
+The matrix is a 6-cell diagonal covering every Postgres version and
+every supported Python/Django at least once with a valid pairing —
+running the full 60-cell (5×4×3) cartesian product is expensive for a
+library that mostly interacts with Postgres through the same
+``psycopg`` interface on every cell. Support policy is the current
+Django LTS lines plus the latest feature release.
 
 ## Monitoring in production
 
