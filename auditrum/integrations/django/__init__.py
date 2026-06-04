@@ -7,16 +7,19 @@ specific conveniences so apps can write::
 
     from auditrum.integrations.django import track, register, AuditLog
 
+
     @track(fields=["status", "total"])
-    class Order(models.Model):
-        ...
+    class Order(models.Model): ...
 """
 
 __all__ = [
     "AuditContext",
     "AuditLog",
+    "auditrum_context",
+    "current_context",
     "register",
     "track",
+    "update_current_context",
 ]
 
 default_app_config = "auditrum.integrations.django.apps.PgAuditIntegrationConfig"
@@ -41,4 +44,16 @@ def __getattr__(name: str):
         from auditrum.integrations.django.models import AuditContext
 
         return AuditContext
+    if name == "auditrum_context":
+        from auditrum.integrations.django.runtime import auditrum_context
+
+        return auditrum_context
+    if name == "current_context":
+        from auditrum.integrations.django.runtime import current_context
+
+        return current_context
+    if name == "update_current_context":
+        from auditrum.integrations.django.runtime import update_current_context
+
+        return update_current_context
     raise AttributeError(name)

@@ -1,7 +1,7 @@
 
 
 {% extends "admin/base_site.html" %}
-{% load i18n static %}
+{% load i18n static audit_tags %}
 
 {% block content %}
 <div class="app-auditlog module">
@@ -41,21 +41,23 @@
                 <td>{{ log.context.metadata.source|default:"–" }}</td>
                 <td>{{ log.context.metadata.change_reason|default:"–" }}</td>
                 <td>
-                    {% if log.diff %}
+                    {% with changes=log.diff|changed_fields %}
+                    {% if changes %}
                     <details>
-                        <summary>View</summary>
+                        <summary>View ({{ changes|length }})</summary>
                         <ul style="margin: 0; padding-left: 1.2em; list-style: disc;">
-                        {% for field, change in log.diff.items %}
+                        {% for field, change in changes.items %}
                             <li>
                                 <code>{{ field }}</code>:
-                                <del style="color: #a33; text-decoration: line-through;">{{ change.old|default:"∅" }}</del>
+                                <del style="color: #a33; text-decoration: line-through;">{{ change.old|default_if_none:"∅" }}</del>
                                 <span style="color: #999;">→</span>
-                                <ins style="color: #273; text-decoration: none; font-weight: 600;">{{ change.new|default:"∅" }}</ins>
+                                <ins style="color: #273; text-decoration: none; font-weight: 600;">{{ change.new|default_if_none:"∅" }}</ins>
                             </li>
                         {% endfor %}
                         </ul>
                     </details>
                     {% else %}–{% endif %}
+                    {% endwith %}
                 </td>
             </tr>
         {% empty %}

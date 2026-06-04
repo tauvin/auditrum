@@ -16,9 +16,7 @@ if not django_settings.configured:
             "django.contrib.messages",
             "auditrum.integrations.django",
         ],
-        DATABASES={
-            "default": {"ENGINE": "django.db.backends.sqlite3", "NAME": ":memory:"}
-        },
+        DATABASES={"default": {"ENGINE": "django.db.backends.sqlite3", "NAME": ":memory:"}},
         ROOT_URLCONF="django.contrib.contenttypes.urls",
         TEMPLATES=[
             {
@@ -54,6 +52,21 @@ class TestLazyReExports:
         from auditrum.integrations.django.models import AuditContext
 
         assert django_pkg.AuditContext is AuditContext
+
+    def test_auditrum_context_is_exposed_lazily(self):
+        from auditrum.integrations.django.runtime import auditrum_context
+
+        assert django_pkg.auditrum_context is auditrum_context
+
+    def test_current_context_is_exposed_lazily(self):
+        from auditrum.integrations.django.runtime import current_context
+
+        assert django_pkg.current_context is current_context
+
+    def test_update_current_context_is_exposed_lazily(self):
+        from auditrum.integrations.django.runtime import update_current_context
+
+        assert django_pkg.update_current_context is update_current_context
 
     def test_unknown_attr_raises_attribute_error(self):
         with pytest.raises(AttributeError):

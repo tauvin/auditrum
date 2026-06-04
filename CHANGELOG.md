@@ -105,9 +105,39 @@ at runtime.
   integration, SQLAlchemy integration, observability). Locks the public
   surface so wildcard imports, static analysis, and auto-generated docs
   see a consistent view of what is and is not part of the supported API.
+- **``update_current_context(**metadata)`` public helper.** Merges extra
+  metadata into the already-open request context for frameworks that
+  resolve the authenticated principal *after* ``AuditrumMiddleware``
+  opens the context — ``django-ninja``'s ``request.auth``, DRF's
+  per-view auth — where the middleware otherwise bakes ``user_id=None``
+  in before auth runs. Call it once the principal is known (e.g. from a
+  ninja ``Depends`` or a DRF auth hook) to attribute every subsequent
+  write in the request. Pushes a new immutable ``_Context`` with the same
+  id and merged metadata; scoped to the current execution context and
+  reset together with the outer context at request end, so callers manage
+  no token. Returns ``False`` when there is no active context, ``True``
+  otherwise. Replaces the ``auditrum_context(...).__enter__()``-without-
+  ``__exit__()`` workaround. ``auditrum_context``, ``current_context`` and
+  ``update_current_context`` are now lazily re-exported from
+  ``auditrum.integrations.django``.
 
 ### Fixed
 
+- **``∅ → ∅`` noise in the default ``object_history.html`` diff render.**
+  The template rendered both sides of each change through Django's
+  ``default`` filter, which substitutes ``∅`` for *any* falsy value —
+  so genuine changes like ``null → false``, ``null → 0`` and ``"" → x``
+  all displayed as ``∅ → ∅``, as if nothing had changed. On top of that
+  the synthetic ``INSERT`` diff carries every column (``{old: null,
+  new: <v>}``), and columns inserted as ``null`` produced real
+  ``null → null`` rows — pure noise. The template now (1) routes
+  ``log.diff`` through a new ``changed_fields`` template filter that drops
+  entries whose ``old`` equals ``new`` (e.g. the ``null → null`` from the
+  synthetic INSERT diff; ``UPDATE`` diffs already exclude unchanged
+  fields), and (2) renders values through ``default_if_none`` instead of
+  ``default``, so ``∅`` is reserved for a genuine SQL ``null`` while
+  ``false`` / ``0`` / ``""`` render honestly. The ``<summary>`` now shows
+  the changed-field count.
 - **N+1 in ``AuditLogAdmin.linked_object`` (was: tens-of-seconds
   changelist + ``CancelledError`` under ASGI).** Each row in the
   ``AuditLog`` admin changelist used to call

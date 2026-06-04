@@ -46,6 +46,7 @@ from auditrum.integrations.django.settings import audit_settings
 __all__ = [
     "auditrum_context",
     "current_context",
+    "update_current_context",
 ]
 
 
@@ -319,3 +320,27 @@ class auditrum_context(contextlib.ContextDecorator):
 def current_context() -> _Context | None:
     """Return the currently-active audit context, if any."""
     return _tracker.get()
+
+
+def update_current_context(**metadata: Any) -> bool:
+    """Merge extra metadata into the active request audit context.
+
+    For frameworks that resolve the authenticated principal AFTER the
+    AuditrumMiddleware context is opened (django-ninja's ``request.auth``,
+    DRF's per-view auth), the middleware bakes ``user_id=None`` into the
+    context before auth runs. Call this once the principal is known (e.g.
+    from a ninja ``Depends`` or a DRF authentication hook) to attribute every
+    subsequent write in the request.
+
+    Pushes a NEW immutable :class:`_Context` with the same id and merged
+    metadata onto the tracker. The value is scoped to the current execution
+    context and is reset together with the outer context at request end (no
+    token to manage on the caller side). Returns ``False`` when there is no
+    active context (nothing to enrich), ``True`` otherwise.
+    """
+    existing = _tracker.get()
+    if existing is None:
+        return False
+    merged = {**existing.metadata, **metadata}
+    _tracker.set(_Context(id=existing.id, metadata=MappingProxyType(merged)))
+    return True

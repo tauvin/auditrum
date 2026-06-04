@@ -41,6 +41,7 @@ from auditrum.integrations.django.runtime import (  # noqa: E402
     _is_ignored_statement,
     auditrum_context,
     current_context,
+    update_current_context,
 )
 
 
@@ -164,6 +165,32 @@ class TestAuditrumContextLifecycle:
         assert current_context() is None
 
 
+class TestUpdateCurrentContext:
+    def test_merges_into_active_context(self):
+        with auditrum_context(user_id=None, source="http"):
+            assert update_current_context(user_id=42, username="bob") is True
+            ctx = current_context()
+            assert ctx.metadata["user_id"] == 42
+            assert ctx.metadata["username"] == "bob"
+            assert ctx.metadata["source"] == "http"  # исходные ключи сохранены
+
+    def test_no_active_context_is_noop(self):
+        assert current_context() is None
+        assert update_current_context(user_id=42) is False
+
+    def test_keeps_context_id_stable(self):
+        with auditrum_context(source="http") as ctx:
+            original_id = ctx.id
+            update_current_context(user_id=7)
+            assert current_context().id == original_id
+
+    def test_resets_with_outer_context_at_block_exit(self):
+        assert current_context() is None
+        with auditrum_context(source="http"):
+            update_current_context(user_id=7)
+        assert current_context() is None
+
+
 class TestInjectAuditContext:
     def _captured_execute(self):
         captured = {}
@@ -244,12 +271,8 @@ class TestInjectAuditContext:
         transaction only."""
         execute, captured_list = self._accumulating_execute()
         with auditrum_context(user_id=1):
-            _inject_audit_context(
-                execute, "INSERT INTO x VALUES (1)", (), False, _make_context()
-            )
-            _inject_audit_context(
-                execute, "UPDATE y SET z=1", (), False, _make_context()
-            )
+            _inject_audit_context(execute, "INSERT INTO x VALUES (1)", (), False, _make_context())
+            _inject_audit_context(execute, "UPDATE y SET z=1", (), False, _make_context())
         assert len(captured_list) == 2
         assert all("set_config" in c["sql"] for c in captured_list)
 
