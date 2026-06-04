@@ -195,14 +195,17 @@ support matrix before 1.0 makes a public commitment to it.
   ``shared_buffers``" is the level of specificity we want. Methodology
   in ``docs/performance.md`` so users can reproduce on their own
   hardware.
-- [ ] **Multi-version CI matrix.** Currently we test one cell:
-  PG 16, Python 3.13, Django latest. Expand to:
-  - PostgreSQL **13, 14, 15, 16, 17**
-  - Python **3.11, 3.12, 3.13** (3.14 once stable)
-  - Django **4.2 LTS, 5.x**
-  Use GitHub Actions matrix with parallelism. Acceptable CI runtime
-  budget: ~10 minutes total wall time despite the matrix expansion.
-  Cache uv venvs per matrix cell.
+- [x] **Multi-version CI matrix.** A 6-cell diagonal in ``ci.yml``
+  covering the cartesian space without paying for all 30 combinations:
+  - PostgreSQL **13, 14, 15, 16, 17** (one per cell, via the
+    ``AUDITRUM_TEST_PG_IMAGE`` env the conftests read)
+  - Python **3.11, 3.12, 3.13, 3.14**
+  - Django **4.2 LTS, 5.2 LTS, 6.0** — support policy is "current LTS
+    lines + latest feature release"; Django pinned per cell with
+    ``uv pip install`` since ``uv.lock`` carries one version.
+  Diagonal respects compatibility (Django 4.2 ≤ Py 3.12; Django 6.0 ≥
+  Py 3.12). ``fail-fast: false`` and a per-cell uv cache suffix. Budget
+  target ~10 min wall (cells run in parallel).
 - [ ] **Memory profiling for ``reconstruct_table``** on a synthetic 10M
   audit-row table. The ``stream=True`` server-side cursor mode added
   in 0.3.1 has never been load-tested — we don't actually know if it

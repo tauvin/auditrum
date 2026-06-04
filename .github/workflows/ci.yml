@@ -5,9 +5,16 @@ name: CI
 # the same checks pre-publish as a belt-and-braces guard, but the gate
 # that catches problems early is this workflow.
 #
-# Matrix expansion (PostgreSQL x Python x Django) is scheduled for 0.5
-# per ROADMAP.md; for now Python 3.11 covers the typing floor and 3.13
-# covers the runtime tests.
+# The test job runs a PostgreSQL x Python x Django matrix (ROADMAP 0.5)
+# so the support surface is exercised before 1.0 commits to it. Support
+# policy: the current Django LTS lines plus the latest feature release
+# (today: 4.2 LTS, 5.2 LTS, 6.0). The matrix is a diagonal arranged so
+# every Postgres version (13-17), every supported Python (3.11-3.14) and
+# every supported Django is covered with a valid combination — Django 4.2
+# tops out at Python 3.12 and Django 6.0 requires Python 3.12+, so the
+# old-Python cells run 4.2/5.2 and the 3.14 cell runs 6.0. The typecheck
+# and lint jobs stay single-cell: the ty gate is pinned to Python 3.11
+# and ruff is version-independent.
 on:
   push:
     branches: [main]
@@ -55,8 +62,32 @@ jobs:
         run: uv run --no-sync --python 3.11 ty check --output-format github
 
   test:
-    name: Unit tests (Python 3.13)
+    name: Tests (PG ${{ matrix.pg }}, Py ${{ matrix.python }}, Django ${{ matrix.django }})
     runs-on: ubuntu-latest
+    strategy:
+      # Run every cell to completion even if one fails — a regression on
+      # one version shouldn't mask the state of the others.
+      fail-fast: false
+      matrix:
+        # Diagonal across the support surface: every Postgres version
+        # (13-17), every supported Python (3.11-3.14) and every supported
+        # Django (4.2, 5.2, 6.0) covered with a valid pairing. Django 4.2
+        # supports Python <=3.12; Django 6.0 requires Python >=3.12. First
+        # cell is the floor (oldest everything), last is the ceiling
+        # (newest everything).
+        include:
+          - { pg: "13", python: "3.11", django: "4.2" }
+          - { pg: "14", python: "3.12", django: "4.2" }
+          - { pg: "15", python: "3.12", django: "5.2" }
+          - { pg: "16", python: "3.13", django: "5.2" }
+          - { pg: "17", python: "3.13", django: "6.0" }
+          - { pg: "17", python: "3.14", django: "6.0" }
+    env:
+      # The integration / benchmark conftests read this to choose the
+      # testcontainers Postgres image (default postgres:16-alpine). Set
+      # via env: rather than inline ${{ }} so the matrix value never
+      # reaches a shell as code.
+      AUDITRUM_TEST_PG_IMAGE: postgres:${{ matrix.pg }}-alpine
     steps:
       - uses: actions/checkout@v5
 
@@ -65,27 +96,34 @@ jobs:
         with:
           version: latest
           enable-cache: true
-          cache-suffix: test
+          # Distinct suffix per cell so cells don't race on cache save
+          # (same reason as the typecheck job's suffix).
+          cache-suffix: test-py${{ matrix.python }}-dj${{ matrix.django }}-pg${{ matrix.pg }}
 
-      - name: Set up Python 3.13
-        run: uv python install 3.13
+      - name: Set up Python ${{ matrix.python }}
+        run: uv python install ${{ matrix.python }}
 
       - name: Install all extras
         run: |
-          uv sync \
+          uv sync --python ${{ matrix.python }} \
             --extra django \
             --extra sqlalchemy \
             --extra observability \
             --extra test
 
+      # uv.lock pins a single Django; override it to the cell's LTS line.
+      # Runs after sync so the rest of the locked environment is intact.
+      - name: Pin Django ${{ matrix.django }}
+        run: uv pip install --python ${{ matrix.python }} "Django==${{ matrix.django }}.*"
+
       # Coverage floor lives in .coveragerc (fail_under=80). Raise as
       # gaps close per ROADMAP 0.4 — the gate fails the job if we drop
       # below the floor, which is what we want between releases.
-      # --no-sync reuses the venv from the previous step; without it
-      # uv re-syncs without the extras and drops pytest / testcontainers /
-      # hypothesis on the floor (same failure mode as the typecheck job).
-      - name: Run unit tests with coverage
-        run: uv run --no-sync pytest tests/ -q --no-header --cov --cov-report=term
+      # --no-sync reuses the venv from the previous steps; without it
+      # uv re-syncs from the lock and undoes the Django pin (and drops
+      # the test extras, same failure mode as the typecheck job).
+      - name: Run tests with coverage
+        run: uv run --no-sync --python ${{ matrix.python }} pytest tests/ -q --no-header --cov --cov-report=term
 
   lint:
     name: ruff
