@@ -57,6 +57,17 @@ the API stabilises.
   in 3.16). Behaviour is unchanged; this just silences the
   ``DeprecationWarning`` on 3.14, now part of the CI test matrix.
 
+### Fixed
+
+- **``reconstruct_table(stream=True)`` no longer fails on autocommit
+  connections.** The streaming mode opens a server-side named cursor
+  (``DECLARE CURSOR``), which Postgres only allows inside a transaction —
+  so calling it on an autocommit connection (the psycopg/Django default)
+  raised ``NoActiveSqlTransaction``. It now opens a short read
+  transaction for the lifetime of the stream when the connection is in
+  autocommit mode; connections that manage their own transaction are
+  untouched. (#13)
+
 ## [0.4.5] — 2026-06-04
 
 ### Added

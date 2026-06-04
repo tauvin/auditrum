@@ -37,6 +37,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Iterator
+from contextlib import nullcontext
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
@@ -161,7 +162,9 @@ def reconstruct_table(
       large tables (millions of distinct ids) where the default mode
       would OOM. Requires that the connection supports named cursors
       (``psycopg`` 3 does; some pooled wrappers do not — fall back to
-      ``stream=False`` if you see ``ProgrammingError`` or similar).
+      ``stream=False`` if you see ``ProgrammingError`` or similar). A
+      server-side cursor needs a transaction; if the connection is in
+      autocommit mode the stream opens a short read transaction for you.
     """
     validate_identifier(audit_table, "audit_table")
     sql = "SELECT object_id, row_data FROM _audit_reconstruct_table(%s, %s)"
@@ -170,7 +173,12 @@ def reconstruct_table(
         # Named server-side cursor — psycopg 3 supports it via the
         # ``name`` argument. Rows are fetched in ``itersize`` batches.
         cursor_name = f"auditrum_tt_{abs(hash((table, at.isoformat()))) & 0xFFFF:04x}"
-        with conn.cursor(name=cursor_name) as cur:
+        # DECLARE CURSOR must run inside a transaction. If the connection is
+        # in autocommit mode it has no open transaction, so open one for the
+        # lifetime of the stream (#13). Connections that manage their own
+        # transaction (autocommit off) are left untouched.
+        tx = conn.transaction() if getattr(conn, "autocommit", False) else nullcontext()
+        with tx, conn.cursor(name=cursor_name) as cur:
             cur.itersize = int(batch_size)
             cur.execute(sql, (table, at))
             for object_id, row_data in cur:
