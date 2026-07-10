@@ -1,9 +1,38 @@
-from datetime import datetime
+from datetime import UTC, datetime, timedelta, timezone
 
 import pytest
 from dateutil.relativedelta import relativedelta
 
-from auditrum.retention import _parse_interval, generate_purge_sql
+import auditrum.retention as retention
+from auditrum.retention import _parse_interval, drop_old_partitions, generate_purge_sql
+
+
+class _FakeCursor:
+    def __init__(self, rows):
+        self._rows = rows
+        self.dropped: list[str] = []
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+    def execute(self, query, params=None):
+        rendered = query.as_string(None) if hasattr(query, "as_string") else str(query)
+        if "DROP TABLE" in rendered:
+            self.dropped.append(rendered)
+
+    def fetchall(self):
+        return self._rows
+
+
+class _FakeConn:
+    def __init__(self, rows):
+        self._cursor = _FakeCursor(rows)
+
+    def cursor(self):
+        return self._cursor
 
 
 class TestParseInterval:
@@ -66,3 +95,78 @@ class TestGeneratePurgeSql:
     def test_rejects_invalid_interval(self):
         with pytest.raises(ValueError):
             generate_purge_sql("auditlog", "forever")
+
+
+class TestDropOldPartitionsTimezone:
+    """The partition upper-bound literal may carry a non-UTC offset when the
+    server's ``timezone`` setting is not UTC. ``drop_old_partitions`` must
+    honour that offset instead of stamping the bound with UTC, otherwise a
+    partition can be dropped hours early."""
+
+    def test_negative_offset_bound_not_dropped_early(self, monkeypatch):
+        # Bound = 2020-01-01 00:00:00-05:00 == 2020-01-01 05:00:00 UTC.
+        # cutoff sits between the (buggy) UTC-stamped instant and the real
+        # offset-aware instant: with the offset preserved upper > cutoff so
+        # the partition is KEPT; the old ``.replace(tzinfo=UTC)`` would have
+        # made upper == cutoff and dropped it.
+        cutoff = datetime(2020, 1, 1, 2, 0, 0, tzinfo=UTC)
+        monkeypatch.setattr(retention, "_cutoff_for", lambda _expr: cutoff)
+        conn = _FakeConn(
+            [
+                (
+                    "auditlog_2019_12",
+                    "FOR VALUES FROM ('2019-01-01-05:00') TO ('2020-01-01 00:00:00-05:00')",
+                )
+            ]
+        )
+
+        dropped = drop_old_partitions(conn, "auditlog", "ignored")
+
+        assert dropped == []
+
+    def test_offset_aware_bound_dropped_when_genuinely_old(self, monkeypatch):
+        # Same bound, but cutoff is now after the real (offset-aware) instant
+        # 2020-01-01 05:00:00 UTC, so the partition is genuinely expired.
+        cutoff = datetime(2020, 1, 1, 6, 0, 0, tzinfo=UTC)
+        monkeypatch.setattr(retention, "_cutoff_for", lambda _expr: cutoff)
+        conn = _FakeConn(
+            [
+                (
+                    "auditlog_2019_12",
+                    "FOR VALUES FROM ('2019-01-01-05:00') TO ('2020-01-01 00:00:00-05:00')",
+                )
+            ]
+        )
+
+        dropped = drop_old_partitions(conn, "auditlog", "ignored")
+
+        assert dropped == ["auditlog_2019_12"]
+
+    def test_naive_bound_defaults_to_utc(self, monkeypatch):
+        # No offset in the literal → treated as UTC (unchanged behaviour).
+        cutoff = datetime(2020, 2, 1, 0, 0, 0, tzinfo=UTC)
+        monkeypatch.setattr(retention, "_cutoff_for", lambda _expr: cutoff)
+        conn = _FakeConn([("auditlog_2020_01", "FOR VALUES FROM ('2020-01-01') TO ('2020-02-01')")])
+
+        dropped = drop_old_partitions(conn, "auditlog", "ignored")
+
+        assert dropped == ["auditlog_2020_01"]
+
+    def test_positive_offset_bound_preserved(self, monkeypatch):
+        # +09:00 bound: 2020-01-01 00:00:00+09:00 == 2019-12-31 15:00:00 UTC.
+        # Buggy replace() would have made it 2020-01-01 00:00:00 UTC (9h
+        # later) and KEPT a partition that is actually expired.
+        cutoff = datetime(2019, 12, 31, 18, 0, 0, tzinfo=timezone(timedelta(hours=0)))
+        monkeypatch.setattr(retention, "_cutoff_for", lambda _expr: cutoff)
+        conn = _FakeConn(
+            [
+                (
+                    "auditlog_2019_12",
+                    "FOR VALUES FROM ('2019-01-01+09:00') TO ('2020-01-01 00:00:00+09:00')",
+                )
+            ]
+        )
+
+        dropped = drop_old_partitions(conn, "auditlog", "ignored")
+
+        assert dropped == ["auditlog_2019_12"]

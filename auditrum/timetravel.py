@@ -36,6 +36,7 @@ The Django integration exposes the same functionality through the
 from __future__ import annotations
 
 import json
+import uuid
 from collections.abc import Iterator
 from contextlib import nullcontext
 from dataclasses import dataclass, field
@@ -172,7 +173,10 @@ def reconstruct_table(
     if stream:
         # Named server-side cursor — psycopg 3 supports it via the
         # ``name`` argument. Rows are fetched in ``itersize`` batches.
-        cursor_name = f"auditrum_tt_{abs(hash((table, at.isoformat()))) & 0xFFFF:04x}"
+        # A fresh UUID guarantees a collision-free cursor name: a
+        # truncated hash could clash across concurrent streams and raise
+        # ``DuplicateCursor``.
+        cursor_name = f"auditrum_tt_{uuid.uuid4().hex}"
         # DECLARE CURSOR must run inside a transaction. If the connection is
         # in autocommit mode it has no open transaction, so open one for the
         # lifetime of the stream (#13). Connections that manage their own

@@ -8,7 +8,34 @@ the API stabilises.
 
 ## [Unreleased]
 
-Nothing yet.
+### Fixed
+
+- **`executemany` / bulk writes silently dropped the audit context.** The
+  Django execute-wrapper injected the per-request context by prepending a
+  ``SELECT set_config(...); `` statement to the user SQL. For ``many=True``
+  (``cursor.executemany`` / ORM ``bulk_create``) this both flattened the
+  GUC parameters into every per-row parameter sequence and produced an
+  invalid two-statement string, so bulk-inserted rows came back with
+  ``context_id = NULL``. The wrapper now sets the transaction-local GUCs
+  once on the cursor up front (one ``set_config`` covers every row in the
+  same transaction) and runs the user ``executemany`` unmodified.
+- **Hardening of the context injection path.** The ``cursor.nextset()``
+  call that steps past the injected ``set_config`` result (the 0.4.3
+  pk-corruption fix) was wrapped in a blanket ``suppress(Exception)``,
+  which could re-mask that very bug. It now only swallows the
+  "backend has no ``nextset()``" signals (``AttributeError`` /
+  ``NotImplementedError``) and logs a warning, letting genuine failures
+  propagate.
+- **Time-travel streaming cursor name could collide.** ``reconstruct_table``
+  with ``stream=True`` derived the server-side cursor name from a truncated
+  16-bit hash, risking ``DuplicateCursor`` under concurrent/colliding
+  streams. It now uses a collision-free ``uuid4`` name.
+- **Partition-retention dropped a non-UTC bound early.** ``drop_old_partitions``
+  parsed the partition upper-bound literal and then overwrote its timezone
+  with UTC via ``.replace(tzinfo=UTC)``, discarding any real offset (which
+  appears when the server's ``timezone`` is not UTC) and potentially dropping
+  a partition hours early. It now preserves the parsed offset and only
+  defaults to UTC when the literal is naive.
 
 ## [0.5.0] — 2026-06-04
 

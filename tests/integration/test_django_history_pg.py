@@ -116,9 +116,7 @@ def test_for_object_returns_trigger_rows(fresh_auditlog, configured_django):
     conn = fresh_auditlog
     with conn.cursor() as cur:
         cur.execute("DROP TABLE IF EXISTS orders CASCADE")
-        cur.execute(
-            "CREATE TABLE orders (id serial PRIMARY KEY, status text NOT NULL)"
-        )
+        cur.execute("CREATE TABLE orders (id serial PRIMARY KEY, status text NOT NULL)")
         cur.execute(generate_trigger_sql("orders"))
         cur.execute("INSERT INTO orders (status) VALUES ('new') RETURNING id")
         (order_id,) = cur.fetchone()
@@ -132,9 +130,7 @@ def test_for_object_returns_trigger_rows(fresh_auditlog, configured_django):
         pk = order_id
 
     ops = list(
-        AuditLog.objects.for_object(FakeOrder())
-        .order_by("id")
-        .values_list("operation", flat=True)
+        AuditLog.objects.for_object(FakeOrder()).order_by("id").values_list("operation", flat=True)
     )
     assert ops == ["INSERT", "UPDATE"]
 
@@ -176,7 +172,8 @@ def test_admin_search_by_context_id_does_not_crash(fresh_auditlog, configured_dj
         cur.execute("INSERT INTO things (name) VALUES ('t1')")
 
     admin_instance = AuditLogAdmin(
-        AuditLog, MagicMock()  # admin_site isn't touched by search
+        AuditLog,
+        MagicMock(),  # admin_site isn't touched by search
     )
     request = MagicMock()
     request.user = MagicMock()
@@ -184,9 +181,7 @@ def test_admin_search_by_context_id_does_not_crash(fresh_auditlog, configured_dj
     # Driving ``get_search_results`` with a UUID term. If the search
     # lookup still referenced ``context_id`` directly we'd crash with
     # FieldError here. Success = no exception + correct matching row.
-    qs, _ = ModelAdmin.get_search_results(
-        admin_instance, request, AuditLog.objects.all(), ctx_uuid
-    )
+    qs, _ = ModelAdmin.get_search_results(admin_instance, request, AuditLog.objects.all(), ctx_uuid)
     matched = list(qs.values_list("table_name", flat=True))
     assert "things" in matched
 
@@ -198,9 +193,7 @@ def test_admin_search_by_context_id_does_not_crash(fresh_auditlog, configured_dj
     list(qs)  # force evaluation — just assert no exception
 
 
-def test_insert_returning_inside_context_returns_real_id(
-    fresh_auditlog, configured_django
-):
+def test_insert_returning_inside_context_returns_real_id(fresh_auditlog, configured_django):
     """Regression for the 0.4.2 UUID-pk bug reported by eridan-catalog.
 
     The context wrapper prepends ``SELECT set_config(...);`` to every
@@ -229,10 +222,7 @@ def test_insert_returning_inside_context_returns_real_id(
     conn = fresh_auditlog
     with conn.cursor() as cur:
         cur.execute("DROP TABLE IF EXISTS returning_widgets CASCADE")
-        cur.execute(
-            "CREATE TABLE returning_widgets ("
-            "id serial PRIMARY KEY, label text NOT NULL)"
-        )
+        cur.execute("CREATE TABLE returning_widgets (id serial PRIMARY KEY, label text NOT NULL)")
         cur.execute(generate_trigger_sql("returning_widgets"))
 
     with (
@@ -259,9 +249,7 @@ def test_insert_returning_inside_context_returns_real_id(
     assert row_id > 0
 
 
-def test_django_orm_create_inside_context_has_int_pk(
-    fresh_auditlog, configured_django
-):
+def test_django_orm_create_inside_context_has_int_pk(fresh_auditlog, configured_django):
     """End-to-end: the same bug at the Django ORM layer.
 
     ``Model.objects.create`` under the hood does
@@ -286,10 +274,7 @@ def test_django_orm_create_inside_context_has_int_pk(
     conn = fresh_auditlog
     with conn.cursor() as cur:
         cur.execute("DROP TABLE IF EXISTS orm_widgets CASCADE")
-        cur.execute(
-            "CREATE TABLE orm_widgets ("
-            "id bigserial PRIMARY KEY, status text NOT NULL)"
-        )
+        cur.execute("CREATE TABLE orm_widgets (id bigserial PRIMARY KEY, status text NOT NULL)")
         cur.execute(generate_trigger_sql("orm_widgets"))
 
     # Step 1: create + capture the bigint id via RETURNING.
@@ -312,6 +297,100 @@ def test_django_orm_create_inside_context_has_int_pk(
                 ("paid", row_id),
             )
             assert cur.rowcount == 1
+
+
+def test_executemany_inside_context_attaches_context(fresh_auditlog, configured_django):
+    """Regression: ``cursor.executemany`` inside an ``auditrum_context``
+    must attach the context to every inserted row.
+
+    The single-statement injection path prepends ``SELECT set_config(...);``
+    to the user SQL, which is invalid for ``executemany`` (a two-statement
+    string can't be run per-row) and would flatten the GUC params into each
+    per-row parameter sequence. The fix sets the transaction-local GUCs once
+    on the cursor up front and then runs the user ``executemany`` unmodified.
+    Every resulting ``auditlog`` row must carry the same non-NULL
+    ``context_id``.
+    """
+    from django.db import connection as django_conn
+
+    from auditrum.integrations.django.models import AuditLog
+    from auditrum.integrations.django.runtime import auditrum_context
+    from auditrum.triggers import generate_trigger_sql
+
+    conn = fresh_auditlog
+    with conn.cursor() as cur:
+        cur.execute("DROP TABLE IF EXISTS many_widgets CASCADE")
+        cur.execute("CREATE TABLE many_widgets (id serial PRIMARY KEY, label text NOT NULL)")
+        cur.execute(generate_trigger_sql("many_widgets"))
+
+    labels = ["m1", "m2", "m3", "m4"]
+    with (
+        auditrum_context(source="executemany-test", change_reason="bulk") as ctx,
+        django_conn.cursor() as cur,
+    ):
+        cur.executemany(
+            "INSERT INTO many_widgets (label) VALUES (%s)",
+            [(label,) for label in labels],
+        )
+        ctx_id = ctx.id
+
+    logs = list(
+        AuditLog.objects.filter(table_name="many_widgets").select_related("context").order_by("id")
+    )
+    assert len(logs) == len(labels), (
+        f"expected {len(labels)} audit rows, got {len(logs)} — the "
+        "executemany injection dropped or duplicated rows"
+    )
+    for log in logs:
+        assert log.context_id == ctx_id, (
+            f"audit row {log.id} has context_id={log.context_id!r}, "
+            f"expected {ctx_id!r}; executemany context injection regressed"
+        )
+        assert log.context is not None
+        assert log.context.metadata["source"] == "executemany-test"
+        assert log.context.metadata["change_reason"] == "bulk"
+
+
+def test_executemany_inside_outer_atomic_attaches_context(fresh_auditlog, configured_django):
+    """Savepoint path: ``executemany`` inside an existing ``transaction.atomic()``.
+
+    When the caller already holds a transaction, the wrapper's own
+    ``transaction.atomic()`` becomes a savepoint. PostgreSQL keeps ``SET LOCAL``
+    GUCs set after a savepoint is established (they are transaction-scoped, not
+    savepoint-scoped), so the context must still reach every executemany row.
+    """
+    from django.db import connection as django_conn
+    from django.db import transaction
+
+    from auditrum.integrations.django.models import AuditLog
+    from auditrum.integrations.django.runtime import auditrum_context
+    from auditrum.triggers import generate_trigger_sql
+
+    conn = fresh_auditlog
+    with conn.cursor() as cur:
+        cur.execute("DROP TABLE IF EXISTS sp_widgets CASCADE")
+        cur.execute("CREATE TABLE sp_widgets (id serial PRIMARY KEY, label text NOT NULL)")
+        cur.execute(generate_trigger_sql("sp_widgets"))
+
+    labels = ["s1", "s2", "s3"]
+    with (
+        transaction.atomic(),
+        auditrum_context(source="sp-executemany") as ctx,
+        django_conn.cursor() as cur,
+    ):
+        cur.executemany(
+            "INSERT INTO sp_widgets (label) VALUES (%s)",
+            [(label,) for label in labels],
+        )
+        ctx_id = ctx.id
+
+    logs = list(AuditLog.objects.filter(table_name="sp_widgets").order_by("id"))
+    assert len(logs) == len(labels)
+    for log in logs:
+        assert log.context_id == ctx_id, (
+            f"row {log.id} context_id={log.context_id!r}, expected {ctx_id!r} — "
+            "executemany context dropped on the savepoint path"
+        )
 
 
 def test_async_orm_propagates_context(fresh_auditlog, configured_django):
@@ -344,10 +423,7 @@ def test_async_orm_propagates_context(fresh_auditlog, configured_django):
     conn = fresh_auditlog
     with conn.cursor() as cur:
         cur.execute("DROP TABLE IF EXISTS async_widgets CASCADE")
-        cur.execute(
-            "CREATE TABLE async_widgets ("
-            "id serial PRIMARY KEY, label text NOT NULL)"
-        )
+        cur.execute("CREATE TABLE async_widgets (id serial PRIMARY KEY, label text NOT NULL)")
         cur.execute(generate_trigger_sql("async_widgets"))
 
     def _sync_insert(label: str) -> None:
@@ -369,23 +445,17 @@ def test_async_orm_propagates_context(fresh_auditlog, configured_django):
             )
 
     async def run():
-        with auditrum_context(
-            source="async-orm-test", change_reason="regress"
-        ) as ctx:
+        with auditrum_context(source="async-orm-test", change_reason="regress") as ctx:
             # ``thread_sensitive=False`` forces dispatch onto the
             # general ``concurrent.futures`` thread pool — this is the
             # cross-thread case the signal fix is meant to cover.
-            await sync_to_async(_sync_insert, thread_sensitive=False)(
-                "from-async"
-            )
+            await sync_to_async(_sync_insert, thread_sensitive=False)("from-async")
             return ctx.id
 
     ctx_id = asyncio.run(run())
 
     log = (
-        AuditLog.objects.filter(
-            table_name="async_widgets", context_id=ctx_id
-        )
+        AuditLog.objects.filter(table_name="async_widgets", context_id=ctx_id)
         .select_related("context")
         .first()
     )
