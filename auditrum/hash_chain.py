@@ -9,7 +9,11 @@ audit log gets:
   runs and can therefore drift from commit order under concurrency
 * a ``row_hash`` computed as
   ``sha256(canonical_payload(id, changed_at, operation, table_name,
-  old_data, new_data, prev_hash))``
+  old_data, new_data, user_id, object_id, diff, context_id, meta,
+  prev_hash, prev_chain_seq))`` — the attribution columns are covered so
+  WHO/why cannot be rewritten unnoticed, and ``prev_chain_seq`` (the
+  previous surviving row's chain_seq) makes interior-row deletion
+  detectable
 * a ``prev_hash`` pointer to the previous row in chain order
 
 ``canonical_payload`` is a stable JSON encoding produced via
@@ -46,7 +50,15 @@ Caveats:
   :func:`auditrum.hardening.generate_revoke_sql` to make the
   application role unable to write to ``auditlog`` directly in the
   first place.
-* :func:`verify_chain` cannot detect deletion of the *last* rows in
+* Deletion of an *interior* row IS detected: each row's hash binds the
+  previous surviving row's ``chain_seq`` (``prev_chain_seq``), so removing
+  a mid-chain row changes its successor's previous-surviving chain_seq and
+  the successor's recomputed hash no longer matches its stored value. The
+  chain is keyless (no HMAC), so an attacker with direct write access could
+  still delete a row *and* recompute every following hash — the append-only
+  revoke hardening above is what actually prevents that; ``prev_chain_seq``
+  raises the bar for anyone who only edits/deletes without recomputing.
+* :func:`verify_chain` still cannot detect deletion of the *last* rows in
   the chain by itself — there is no neighbour after the gap to
   mismatch against. Use ``expected_tip=`` together with
   :func:`get_chain_tip` snapshots stored externally.
@@ -65,23 +77,40 @@ __all__ = [
 
 # The shared SQL fragment that produces the canonical bytes hashed by both
 # the insert trigger and the server-side verify query. Keeping this in one
-# constant guarantees that the two SQL paths cannot drift.
+# template guarantees that the two SQL paths cannot drift — they format the
+# *same* string with context-specific substitutions only.
 #
-# ``{prev}`` is replaced with ``last_hash`` (in the trigger) or
-# ``expected_prev`` (in the verify query). Everything else is a column
-# reference that exists in both contexts. ``chain_seq`` is intentionally
-# **not** part of the payload — it's metadata for chain ordering, not
-# part of the audited content. Tampering with chain_seq alone is caught
-# by the verify pass because it shuffles the lookup order, which makes
-# subsequent prev_hash checks fail.
+# Substitutions:
+#   ``{col}``      — column-reference prefix: ``NEW.`` in the trigger,
+#                    empty in the verify query (bare columns from the SELECT).
+#   ``{prev}``     — previous row's row_hash: ``last_hash`` (trigger) or the
+#                    ``expected_prev`` LAG output (verify).
+#   ``{prev_seq}`` — previous SURVIVING row's chain_seq: ``last_chain_seq``
+#                    (trigger) or the ``expected_prev_chain_seq`` LAG output
+#                    (verify). Binding this into the hash makes interior
+#                    deletion detectable: removing a mid-chain row changes
+#                    the successor's previous-surviving chain_seq, so its
+#                    recomputed hash no longer matches the stored one.
+#
+# The attribution columns (``user_id``, ``object_id``, ``diff``,
+# ``context_id``, ``meta``) are hashed too, so WHO/why cannot be rewritten
+# without breaking verification. The row's own ``chain_seq`` stays out of
+# the payload (it's chain-ordering metadata, not audited content); only the
+# *previous* surviving row's chain_seq is bound, via ``{prev_seq}``.
 _CANONICAL_PAYLOAD_EXPR = """jsonb_build_object(
-            'id', id,
-            'changed_at', changed_at,
-            'operation', operation,
-            'table_name', table_name,
-            'old_data', old_data,
-            'new_data', new_data,
-            'prev_hash', {prev}
+            'id', {col}id,
+            'changed_at', {col}changed_at,
+            'operation', {col}operation,
+            'table_name', {col}table_name,
+            'old_data', {col}old_data,
+            'new_data', {col}new_data,
+            'user_id', {col}user_id,
+            'object_id', {col}object_id,
+            'diff', {col}diff,
+            'context_id', {col}context_id,
+            'meta', {col}meta,
+            'prev_hash', {prev},
+            'prev_chain_seq', {prev_seq}
         )::text"""
 
 
@@ -100,17 +129,13 @@ def generate_hash_chain_sql(table_name: str = "auditlog") -> str:
     trig_name = f"{table_name}_hash_chain"
     seq_name = f"{table_name}_chain_seq"
 
-    # In the trigger context the column references are NEW.<col> and the
-    # previous-hash variable is `last_hash`.
-    trigger_payload = """jsonb_build_object(
-            'id', NEW.id,
-            'changed_at', NEW.changed_at,
-            'operation', NEW.operation,
-            'table_name', NEW.table_name,
-            'old_data', NEW.old_data,
-            'new_data', NEW.new_data,
-            'prev_hash', last_hash
-        )::text"""
+    # In the trigger context the column references are NEW.<col>, the
+    # previous-hash variable is `last_hash`, and the previous surviving
+    # row's chain_seq is `last_chain_seq`. Built from the shared template
+    # so trigger and verify produce byte-identical canonical JSON.
+    trigger_payload = _CANONICAL_PAYLOAD_EXPR.format(
+        col="NEW.", prev="last_hash", prev_seq="last_chain_seq"
+    )
 
     return f"""
 CREATE EXTENSION IF NOT EXISTS pgcrypto;
@@ -124,6 +149,7 @@ CREATE SEQUENCE IF NOT EXISTS {seq_name};
 CREATE OR REPLACE FUNCTION {fn_name}() RETURNS trigger AS $$
 DECLARE
     last_hash text;
+    last_chain_seq bigint;
     payload text;
 BEGIN
     -- Serialise concurrent inserts so chain_seq matches lock-acquisition
@@ -145,7 +171,10 @@ BEGIN
     -- Ordering picks the *most recent* row to chain to:
     -- chain_seq DESC (newest first) with NULLs sorted last, then id
     -- DESC as the tiebreaker for legacy rows. LIMIT 1 takes the head.
-    SELECT row_hash INTO last_hash
+    -- Capture the predecessor's chain_seq too; binding it into this row's
+    -- hash is what makes an interior deletion detectable (the deleted
+    -- row's chain_seq is recorded in its successor's hash).
+    SELECT row_hash, chain_seq INTO last_hash, last_chain_seq
     FROM {table_name}
     WHERE row_hash IS NOT NULL
       AND (
@@ -255,18 +284,26 @@ def verify_chain(
     from psycopg import sql
 
     # In the verify context the column references are bare (the SELECT
-    # comes straight from the audit table) and the previous-hash variable
-    # is the LAG window function output `expected_prev`.
-    verify_payload = _CANONICAL_PAYLOAD_EXPR.format(prev="expected_prev")
+    # comes straight from the audit table), the previous-hash variable is
+    # the LAG(row_hash) window output `expected_prev`, and the previous
+    # surviving row's chain_seq is the LAG(chain_seq) output
+    # `expected_prev_chain_seq`. Built from the same template as the
+    # trigger so the canonical JSON is byte-identical.
+    verify_payload = _CANONICAL_PAYLOAD_EXPR.format(
+        col="", prev="expected_prev", prev_seq="expected_prev_chain_seq"
+    )
 
     query = sql.SQL(
         """
         WITH ordered AS (
             SELECT
                 id, changed_at, operation, table_name, old_data, new_data,
+                user_id, object_id, diff, context_id, meta,
                 row_hash, prev_hash, chain_seq,
                 LAG(row_hash) OVER (ORDER BY chain_seq NULLS FIRST, id)
-                    AS expected_prev
+                    AS expected_prev,
+                LAG(chain_seq) OVER (ORDER BY chain_seq NULLS FIRST, id)
+                    AS expected_prev_chain_seq
             FROM {tbl}
             WHERE row_hash IS NOT NULL
         )

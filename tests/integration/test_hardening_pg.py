@@ -57,12 +57,8 @@ def limited_role(audit_setup):
     with conn.cursor() as cur:
         cur.execute("DROP ROLE IF EXISTS app_test_user")
         cur.execute("CREATE ROLE app_test_user LOGIN PASSWORD 'x'")
-        cur.execute(
-            "GRANT SELECT, INSERT, UPDATE, DELETE ON widgets TO app_test_user"
-        )
-        cur.execute(
-            "GRANT USAGE, SELECT ON SEQUENCE widgets_id_seq TO app_test_user"
-        )
+        cur.execute("GRANT SELECT, INSERT, UPDATE, DELETE ON widgets TO app_test_user")
+        cur.execute("GRANT USAGE, SELECT ON SEQUENCE widgets_id_seq TO app_test_user")
         # Grant SELECT explicitly so we can verify hardening preserves it
         cur.execute("GRANT SELECT ON auditlog TO app_test_user")
         cur.execute("GRANT SELECT ON audit_context TO app_test_user")
@@ -88,9 +84,7 @@ class TestHardeningAppendOnly:
     but cannot forge, modify, or delete them directly.
     """
 
-    def test_trigger_path_still_works_for_limited_role(
-        self, audit_setup, limited_role, pg_dsn
-    ):
+    def test_trigger_path_still_works_for_limited_role(self, audit_setup, limited_role, pg_dsn):
         """SECURITY DEFINER: a limited role with NO direct write on auditlog
         can still produce audit rows by writing to tracked tables.
         """
@@ -104,16 +98,12 @@ class TestHardeningAppendOnly:
         # Verify the audit row actually landed — use the superuser conn to read
         conn = audit_setup
         with conn.cursor() as cur:
-            cur.execute(
-                "SELECT operation, table_name FROM auditlog WHERE table_name = 'widgets'"
-            )
+            cur.execute("SELECT operation, table_name FROM auditlog WHERE table_name = 'widgets'")
             rows = cur.fetchall()
         assert len(rows) == 1
         assert rows[0] == ("INSERT", "widgets")
 
-    def test_direct_insert_into_auditlog_blocked(
-        self, audit_setup, limited_role, pg_dsn
-    ):
+    def test_direct_insert_into_auditlog_blocked(self, audit_setup, limited_role, pg_dsn):
         """A compromised app role must not be able to forge audit rows
         by bypassing the trigger path entirely.
         """
@@ -128,9 +118,7 @@ class TestHardeningAppendOnly:
                 "VALUES ('HACKED', 'users', '1')"
             )
 
-    def test_direct_insert_into_audit_context_blocked(
-        self, audit_setup, limited_role, pg_dsn
-    ):
+    def test_direct_insert_into_audit_context_blocked(self, audit_setup, limited_role, pg_dsn):
         """Same for the context table — forging a context_id would let an
         attacker attribute their rows to a different user.
         """
@@ -145,9 +133,7 @@ class TestHardeningAppendOnly:
                 "VALUES ('00000000-0000-0000-0000-000000000001', '{}'::jsonb)"
             )
 
-    def test_direct_update_into_auditlog_blocked(
-        self, audit_setup, limited_role, pg_dsn
-    ):
+    def test_direct_update_into_auditlog_blocked(self, audit_setup, limited_role, pg_dsn):
         """Rewriting history must fail even for a normal audit row that the
         limited role legitimately produced via the trigger path.
         """
@@ -164,9 +150,7 @@ class TestHardeningAppendOnly:
         ):
             cur.execute("UPDATE auditlog SET operation = 'HACKED'")
 
-    def test_direct_delete_from_auditlog_blocked(
-        self, audit_setup, limited_role, pg_dsn
-    ):
+    def test_direct_delete_from_auditlog_blocked(self, audit_setup, limited_role, pg_dsn):
         limited_dsn = _limited_dsn(pg_dsn)
         with (
             psycopg.connect(limited_dsn, autocommit=True) as app_conn,
@@ -212,9 +196,7 @@ class TestHardeningAppendOnly:
                     "UPDATE auditlog SET operation = 'ADMIN_UPDATED' "
                     "WHERE operation = 'ADMIN_INSERT'"
                 )
-                cur.execute(
-                    "DELETE FROM auditlog WHERE operation = 'ADMIN_UPDATED'"
-                )
+                cur.execute("DELETE FROM auditlog WHERE operation = 'ADMIN_UPDATED'")
         finally:
             with conn.cursor() as cur:
                 cur.execute("DROP OWNED BY audit_admin_test CASCADE")
@@ -233,6 +215,96 @@ class TestHashChainRoundtrip:
         assert result["ok"], result["broken"]
         assert result["checked"] == 3
 
+    def test_empty_chain_verifies(self, audit_setup):
+        """A freshly-enabled chain with no rows is trivially intact."""
+        conn = audit_setup
+        with conn.cursor() as cur:
+            cur.execute(generate_hash_chain_sql("auditlog"))
+        result = verify_chain(conn, "auditlog")
+        assert result["checked"] == 0
+        assert result["ok"]
+        assert result["broken"] == []
+
+    def test_single_row_chain_verifies(self, audit_setup):
+        """A one-row chain (prev_hash and prev_chain_seq both NULL) verifies."""
+        conn = audit_setup
+        with conn.cursor() as cur:
+            cur.execute(generate_hash_chain_sql("auditlog"))
+            cur.execute("INSERT INTO widgets (name) VALUES ('only')")
+        result = verify_chain(conn, "auditlog")
+        assert result["ok"], result["broken"]
+        assert result["checked"] == 1
+
+    def test_interior_deletion_is_detected(self, audit_setup):
+        """Deleting a mid-chain row (neither first nor last) must break
+        verification. Each row's hash binds the previous surviving row's
+        chain_seq, so removing an interior row changes its successor's
+        previous-surviving chain_seq and the successor's recomputed hash
+        no longer matches its stored value."""
+        conn = audit_setup
+        with conn.cursor() as cur:
+            cur.execute(generate_hash_chain_sql("auditlog"))
+            for name in ("a", "b", "c", "d"):
+                cur.execute("INSERT INTO widgets (name) VALUES (%s)", (name,))
+            cur.execute("SELECT id FROM auditlog ORDER BY chain_seq")
+            ids = [row[0] for row in cur.fetchall()]
+        # Sanity: intact chain passes before the deletion.
+        assert verify_chain(conn, "auditlog")["ok"]
+
+        interior_id = ids[1]  # second of four — neither first nor last
+        with conn.cursor() as cur:
+            cur.execute("DELETE FROM auditlog WHERE id = %s", (interior_id,))
+
+        result = verify_chain(conn, "auditlog")
+        assert not result["ok"], "interior deletion went undetected"
+
+    def test_attribution_tamper_is_detected(self, audit_setup):
+        """Rewriting an attribution column (user_id) must break verification.
+        Proves the hashed payload now covers WHO performed the change."""
+        conn = audit_setup
+        with conn.cursor() as cur:
+            cur.execute(generate_hash_chain_sql("auditlog"))
+            # Direct inserts (superuser) so we control user_id explicitly.
+            cur.execute(
+                "INSERT INTO auditlog (operation, table_name, object_id, user_id) "
+                "VALUES ('UPDATE', 'widgets', '1', 7)"
+            )
+            cur.execute(
+                "INSERT INTO auditlog (operation, table_name, object_id, user_id) "
+                "VALUES ('UPDATE', 'widgets', '2', 7)"
+            )
+        assert verify_chain(conn, "auditlog")["ok"]
+
+        with conn.cursor() as cur:
+            # Reassign the first event to a different user, bypassing triggers.
+            cur.execute(
+                "UPDATE auditlog SET user_id = 99 WHERE id = (SELECT MIN(id) FROM auditlog)"
+            )
+        result = verify_chain(conn, "auditlog")
+        assert not result["ok"]
+        assert any("row_hash mismatch" in reason for _, reason in result["broken"])
+
+    def test_reorder_is_detected(self, audit_setup):
+        """Swapping two rows' chain_seq must break verification — the chain
+        proves ordering, not just content."""
+        conn = audit_setup
+        with conn.cursor() as cur:
+            cur.execute(generate_hash_chain_sql("auditlog"))
+            for name in ("a", "b", "c"):
+                cur.execute("INSERT INTO widgets (name) VALUES (%s)", (name,))
+            cur.execute("SELECT id, chain_seq FROM auditlog ORDER BY chain_seq")
+            rows = cur.fetchall()
+        assert verify_chain(conn, "auditlog")["ok"]
+
+        (id1, seq1), (id2, seq2) = rows[0], rows[1]
+        with conn.cursor() as cur:
+            # Swap chain_seq of the first two rows via a temporary value.
+            cur.execute("UPDATE auditlog SET chain_seq = -1 WHERE id = %s", (id1,))
+            cur.execute("UPDATE auditlog SET chain_seq = %s WHERE id = %s", (seq1, id2))
+            cur.execute("UPDATE auditlog SET chain_seq = %s WHERE id = %s", (seq2, id1))
+        result = verify_chain(conn, "auditlog")
+        assert not result["ok"], "reorder went undetected"
+
     def test_tampered_row_is_detected(self, audit_setup):
         conn = audit_setup
         with conn.cursor() as cur:
@@ -241,7 +313,7 @@ class TestHashChainRoundtrip:
             cur.execute("INSERT INTO widgets (name) VALUES ('b')")
             # Tamper: change new_data of an existing row directly
             cur.execute(
-                "UPDATE auditlog SET new_data = '{\"name\": \"HACKED\"}'::jsonb "
+                'UPDATE auditlog SET new_data = \'{"name": "HACKED"}\'::jsonb '
                 "WHERE id = (SELECT MIN(id) FROM auditlog)"
             )
         result = verify_chain(conn, "auditlog")
@@ -269,9 +341,7 @@ class TestHashChainRoundtrip:
 
         # Now delete the tail row directly (an attacker bypasses the chain)
         with conn.cursor() as cur:
-            cur.execute(
-                "DELETE FROM auditlog WHERE id = (SELECT MAX(id) FROM auditlog)"
-            )
+            cur.execute("DELETE FROM auditlog WHERE id = (SELECT MAX(id) FROM auditlog)")
 
         # Without the tip anchor, the LAG check sees no problem
         result_no_anchor = verify_chain(conn, "auditlog")
@@ -301,9 +371,7 @@ class TestHashChainRoundtrip:
 
         result = verify_chain(conn, "auditlog", expected_tip=tip)
         assert not result["ok"]
-        assert any(
-            "tip row_hash mismatch" in reason for _, reason in result["broken"]
-        )
+        assert any("tip row_hash mismatch" in reason for _, reason in result["broken"])
 
     def test_get_chain_tip_empty_log(self, audit_setup):
         """Sane behaviour when the chain is brand new: no rows, all-None tip."""
@@ -392,9 +460,7 @@ class TestRetentionRoundtrip:
         with conn.cursor() as cur:
             # Insert a row and backdate it
             cur.execute("INSERT INTO widgets (name) VALUES ('old')")
-            cur.execute(
-                "UPDATE auditlog SET changed_at = now() - interval '100 days'"
-            )
+            cur.execute("UPDATE auditlog SET changed_at = now() - interval '100 days'")
             cur.execute("INSERT INTO widgets (name) VALUES ('fresh')")
 
             query = generate_purge_sql("auditlog", "30 days")

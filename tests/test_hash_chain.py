@@ -35,7 +35,10 @@ class TestGenerateHashChainSql:
         assert "jsonb_build_object" in sql
         # Old vulnerable form: "|| '|' ||" — must not be there
         assert "|| '|' ||" not in sql
-        # All seven fields must appear in the canonical object
+        # Every hashed field must appear in the canonical object — including
+        # the attribution columns (who/why) and prev_chain_seq, added in the
+        # pre-1.0 hardening so tampering with attribution or deleting an
+        # interior row breaks verification.
         for field in (
             "'id', NEW.id",
             "'changed_at', NEW.changed_at",
@@ -43,7 +46,13 @@ class TestGenerateHashChainSql:
             "'table_name', NEW.table_name",
             "'old_data', NEW.old_data",
             "'new_data', NEW.new_data",
+            "'user_id', NEW.user_id",
+            "'object_id', NEW.object_id",
+            "'diff', NEW.diff",
+            "'context_id', NEW.context_id",
+            "'meta', NEW.meta",
             "'prev_hash', last_hash",
+            "'prev_chain_seq', last_chain_seq",
         ):
             assert field in sql, f"missing field binding: {field}"
 
@@ -134,9 +143,7 @@ class TestVerifyChainAcceptsTipParam:
         conn.cursor.return_value = cur
 
         # Just verify the function accepts the kwarg without crashing
-        result = verify_chain(
-            conn, "auditlog", expected_tip={"id": 1, "row_hash": "x"}
-        )
+        result = verify_chain(conn, "auditlog", expected_tip={"id": 1, "row_hash": "x"})
         assert "checked" in result
         assert "ok" in result
         assert "broken" in result
