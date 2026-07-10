@@ -151,7 +151,10 @@ class AuditHistoryMixin(_ModelAdminBase):
             return self._get_obj_does_not_exist_redirect(  # ty: ignore[unresolved-attribute]
                 request, self.model._meta, object_id
             )
-        logs = AuditLog.objects.for_object(obj).order_by("-changed_at")
+        # `id` (serial) breaks ties on `changed_at`: `now()` is the transaction
+        # start time, so events written in one transaction share a timestamp;
+        # ordering by id (write order) keeps them chronological and pagination stable.
+        logs = AuditLog.objects.for_object(obj).order_by("-changed_at", "-id")
 
         paginator = Paginator(logs, 20)
         page_number = request.GET.get("page", 1)

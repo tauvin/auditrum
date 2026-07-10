@@ -118,7 +118,9 @@ class AuditLogAdmin(admin.ModelAdmin):
     # query hits the ``auditlog_context_id_idx`` btree directly.
     search_fields = ("object_id", "context__id__exact")
     readonly_fields = [f.name for f in AuditLog._meta.fields]
-    ordering = ("-changed_at",)
+    # `-id` (serial) breaks ties: `now()` gives all events in one transaction the
+    # same `changed_at`, so id (write order) keeps the changelist chronological.
+    ordering = ("-changed_at", "-id")
 
     # When ``False`` (default) the ``linked_object`` column renders a
     # cheap ``<table>#<id>`` link to the standard admin change view —

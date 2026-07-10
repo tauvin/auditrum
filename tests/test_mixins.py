@@ -216,6 +216,9 @@ class TestObjectHistoryView:
             mixin.object_history_view(request, "42")
 
         mock_for_object.assert_called_once_with(fake_obj)
+        # `-id` tiebreaker keeps same-transaction events (identical changed_at
+        # from now()) in write order and pagination stable.
+        mock_qs.order_by.assert_called_once_with("-changed_at", "-id")
 
     def test_redirects_when_object_missing(self):
         mixin = self._make_mixin(fake_obj=None)
