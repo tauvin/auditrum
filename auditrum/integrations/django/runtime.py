@@ -13,7 +13,10 @@ context cannot lose-write each other's metadata:
    the current context UUID and JSON-serialized metadata. Because the config
    call and the real statement are in the **same** SQL submission, they
    share a transaction so ``is_local=true`` (``SET LOCAL`` semantics) applies
-   without needing ``transaction.atomic()``.
+   without needing ``transaction.atomic()``. (The ``executemany`` path is the
+   exception — a two-statement string can't run per-row, so it sets the GUCs
+   once inside a short ``transaction.atomic()`` block and runs the user
+   ``executemany`` unmodified.)
 3. Nested entries push a **new** ``_Context`` onto the ``ContextVar`` with
    merged metadata. The outermost context is restored on inner exit. No
    shared mutable state — safe under concurrent async tasks.
@@ -32,6 +35,7 @@ from __future__ import annotations
 
 import contextlib
 import json
+import logging
 import uuid
 from collections.abc import Mapping
 from contextvars import ContextVar
@@ -39,9 +43,11 @@ from dataclasses import dataclass, field
 from types import MappingProxyType
 from typing import Any
 
-from django.db import connection
+from django.db import connection, transaction
 
 from auditrum.integrations.django.settings import audit_settings
+
+logger = logging.getLogger(__name__)
 
 __all__ = [
     "auditrum_context",
@@ -191,6 +197,33 @@ def _inject_audit_context(execute, sql, params, many, context):
         "auditrum__context_metadata": serialized_metadata,
     }
 
+    if many:
+        # executemany: the multi-statement-prefix trick breaks here. The
+        # GUC params would be flattened into every per-row parameter
+        # sequence, and a two-statement string is not valid for
+        # ``executemany``. Instead set the (transaction-local) GUCs once
+        # on the cursor up front — one ``set_config(..., is_local=true)``
+        # covers every row in the same transaction — then run the user's
+        # ``executemany`` unmodified, with no ``nextset()`` afterward.
+        #
+        # The GUC ``set_config`` and the ``executemany`` MUST share a
+        # transaction: under autocommit each statement would otherwise be
+        # its own transaction and the ``is_local=true`` setting would be
+        # discarded before the rows are inserted (and the trigger reads it
+        # via ``current_setting`` at insert time). ``transaction.atomic()``
+        # brackets both: when already inside a transaction it opens a
+        # savepoint whose ``SET LOCAL`` persists to the enclosing
+        # transaction on release; under autocommit it opens a real
+        # transaction that is committed when the block exits, after which
+        # the local GUC is cleanly discarded — no session-level leak.
+        cursor = context["cursor"]
+        with transaction.atomic(using=context["connection"].alias):
+            cursor.execute(
+                "SELECT set_config(%s, %s, true), set_config(%s, %s, true)",
+                list(ctx_params.values()),
+            )
+            return execute(sql, params, many, context)
+
     if isinstance(params, dict):
         id_name_ph = "%(auditrum__guc_id_name)s"
         id_val_ph = "%(auditrum__context_id)s"
@@ -233,11 +266,20 @@ def _inject_audit_context(execute, sql, params, many, context):
     cursor = context.get("cursor")
     if cursor is not None:
         # Defensive: if a custom backend's cursor doesn't support
-        # ``nextset()``, fall through rather than crash. Better a
-        # cursor-state issue downstream than a hard failure here on
-        # every query.
-        with contextlib.suppress(Exception):
+        # ``nextset()``, fall through rather than crash. We only swallow
+        # the "backend can't do nextset" signals (``AttributeError`` /
+        # ``NotImplementedError``). A *genuine* nextset() failure must
+        # NOT be masked — suppressing it would silently leave the cursor
+        # on the ``set_config`` result set and re-introduce the 0.4.3
+        # pk-corruption bug, so we let any other exception propagate.
+        try:
             cursor.nextset()
+        except (AttributeError, NotImplementedError):
+            logger.warning(
+                "cursor.nextset() unsupported by backend %r; "
+                "audit-context injection may corrupt query results",
+                type(cursor).__name__,
+            )
 
     return result
 
