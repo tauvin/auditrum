@@ -59,7 +59,7 @@ class AuditLogQuerySet(models.QuerySet):
 
     def recent(self, limit: int = 100) -> "AuditLogQuerySet":
         """Most recent ``limit`` events overall, newest first."""
-        return self.order_by("-changed_at")[:limit]
+        return self.order_by("-changed_at", "-id")[:limit]
 
 
 class AuditLogManager(models.Manager.from_queryset(AuditLogQuerySet)):  # ty: ignore[unsupported-base]
