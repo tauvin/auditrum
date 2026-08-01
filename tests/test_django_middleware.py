@@ -122,9 +122,7 @@ class TestMiddlewareGetContext:
         assert ctx["session_key"] is None
 
     def test_hash_disabled_via_setting(self, monkeypatch):
-        monkeypatch.setattr(
-            django_settings, "PGAUDIT_HASH_SESSION_KEY", False, raising=False
-        )
+        monkeypatch.setattr(django_settings, "PGAUDIT_HASH_SESSION_KEY", False, raising=False)
         mw = AuditrumMiddleware(get_response=lambda r: None)
         ctx = mw.get_context(_fake_request(session_key="raw_token"))
         assert ctx["session_key"] == "raw_token"
@@ -135,9 +133,7 @@ class TestMiddlewareGetContext:
         assert ctx["user_agent"] == "Mozilla/Test"
 
     def test_user_agent_redacted_via_setting(self, monkeypatch):
-        monkeypatch.setattr(
-            django_settings, "PGAUDIT_REDACT_USER_AGENT", True, raising=False
-        )
+        monkeypatch.setattr(django_settings, "PGAUDIT_REDACT_USER_AGENT", True, raising=False)
         mw = AuditrumMiddleware(get_response=lambda r: None)
         ctx = mw.get_context(_fake_request(ua="Mozilla/Test"))
         assert "user_agent" not in ctx

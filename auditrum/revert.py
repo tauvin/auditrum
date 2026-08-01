@@ -1,5 +1,6 @@
 from psycopg import sql
 
+from auditrum.executor import ConnectionProtocol
 from auditrum.tracking.spec import validate_identifier
 
 __all__ = [
@@ -9,7 +10,9 @@ __all__ = [
 ]
 
 
-def get_revert_columns_from_log(conn, audit_table: str, log_id: int) -> list[str]:
+def get_revert_columns_from_log(
+    conn: ConnectionProtocol, audit_table: str, log_id: int
+) -> list[str]:
     """Return the column names that should be restored when reverting a log entry.
 
     Skips ``id`` because the primary key is invariant — the revert is
@@ -72,7 +75,7 @@ def generate_revert_sql(
 
 
 def generate_revert_sql_from_log(
-    conn, audit_table: str, table_name: str, record_id: str, log_id: int
+    conn: ConnectionProtocol, audit_table: str, table_name: str, record_id: str, log_id: int
 ) -> str:
     columns = get_revert_columns_from_log(conn, audit_table, log_id)
     return generate_revert_sql(audit_table, table_name, record_id, log_id, columns)

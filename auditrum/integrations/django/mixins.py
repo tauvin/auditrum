@@ -5,8 +5,9 @@ from typing import TYPE_CHECKING
 from django.contrib.admin.utils import unquote
 from django.core.paginator import EmptyPage, PageNotAnInteger, Paginator
 from django.db import connection as _django_connection
+from django.http import HttpRequest, HttpResponse
 from django.shortcuts import render
-from django.urls import path
+from django.urls import URLPattern, path
 
 from auditrum.integrations.django.models import AuditLog, AuditLogQuerySet
 from auditrum.timetravel import (
@@ -28,7 +29,10 @@ if TYPE_CHECKING:
     from django.db.models import Model
 
     _ModelBase = Model
-    _ModelAdminBase = ModelAdmin
+    # ``AuditHistoryMixin`` is mixed into a concrete ``ModelAdmin`` at the
+    # call site, so the model it administers is only known there. ``Model``
+    # is the widest correct argument for the mixin's own view of ``self``.
+    _ModelAdminBase = ModelAdmin[Model]
 else:
     _ModelBase = object
     _ModelAdminBase = object
@@ -54,17 +58,18 @@ class AuditedModelMixin(_ModelBase):
             status = models.CharField(max_length=32)
             ...
 
+
         order = Order.objects.get(pk=1)
 
         # all events on this row, newest first
-        order.audit_events.order_by('-changed_at')
+        order.audit_events.order_by("-changed_at")
 
         # state at a specific moment
         snapshot = order.audit_at(datetime(2024, 6, 1, tzinfo=UTC))
         print(snapshot.status, snapshot.data)
 
         # timeline of a single field
-        for ts, email in order.audit_field_history('email'):
+        for ts, email in order.audit_field_history("email"):
             print(ts, email)
 
         # every surviving row at a given time
@@ -119,9 +124,7 @@ class AuditedModelMixin(_ModelBase):
         are skipped. Each yielded :class:`HistoricalRow` can be converted to
         an unsaved model instance via ``.to_model(cls)`` if needed.
         """
-        for obj_id, data in reconstruct_table(
-            _django_connection, table=cls._meta.db_table, at=at
-        ):
+        for obj_id, data in reconstruct_table(_django_connection, table=cls._meta.db_table, at=at):
             yield HistoricalRow(
                 table=cls._meta.db_table,
                 object_id=str(obj_id),
@@ -131,7 +134,7 @@ class AuditedModelMixin(_ModelBase):
 
 
 class AuditHistoryMixin(_ModelAdminBase):
-    def get_urls(self):
+    def get_urls(self) -> list[URLPattern]:
         urls = super().get_urls()
         custom_urls = [
             path(
@@ -142,13 +145,13 @@ class AuditHistoryMixin(_ModelAdminBase):
         ]
         return custom_urls + urls
 
-    def object_history_view(self, request, object_id):
+    def object_history_view(self, request: HttpRequest, object_id: str) -> HttpResponse:
         obj = self.get_object(request, unquote(object_id))
         if obj is None:
             # django-stubs doesn't expose the underscore-prefixed helper
             # even though ModelAdmin ships it — same pattern Django's own
             # admin.options.ModelAdmin.history_view uses.
-            return self._get_obj_does_not_exist_redirect(  # ty: ignore[unresolved-attribute]
+            return self._get_obj_does_not_exist_redirect(  # pyrefly: ignore[missing-attribute]
                 request, self.model._meta, object_id
             )
         # `id` (serial) breaks ties on `changed_at`: `now()` is the transaction

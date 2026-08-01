@@ -53,6 +53,11 @@ jobs:
         # keeps CI reproducible without putting ruff in pyproject.toml.
         run: uvx ruff@0.15 check .
 
+      # Mirrors the ci.yml lint job so a tag can't publish a tree that
+      # would fail the format gate on main.
+      - name: Format check
+        run: uvx ruff@0.15 format --check .
+
   # ---------------------------------------------------------------------
   # Step 2: build wheels + sdist, validate version, publish to PyPI.
   # ---------------------------------------------------------------------

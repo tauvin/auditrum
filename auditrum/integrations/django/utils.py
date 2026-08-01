@@ -8,8 +8,9 @@ from django.db import models
 from django.shortcuts import resolve_url
 from django.utils.formats import date_format
 from django.utils.html import format_html
-from django.utils.safestring import mark_safe
+from django.utils.safestring import SafeString, mark_safe
 
+from auditrum.integrations.django.models import AuditLog
 from auditrum.utils import audit_tracked  # re-exported for backwards compatibility
 
 
@@ -57,13 +58,22 @@ def link(href: str, text: str) -> str:
 
 
 def link_to_related_object(obj: models.Model, name: str | None = None) -> str:
-    url = resolve_url(admin_urlname(obj._meta, "change"), obj.pk)  # ty: ignore[invalid-argument-type]
+    # django-stubs types admin_urlname's second argument as SafeString even
+    # though Django passes a plain str literal at every call site.
+    # pyrefly: ignore[bad-argument-type]
+    url = resolve_url(admin_urlname(obj._meta, "change"), obj.pk)
     return link(url, name or str(obj))
 
 
-def resolve_field_value(model_class, field_name, value):
+def resolve_field_value(
+    model_class: type[models.Model], field_name: str, value: Any
+) -> tuple[str, Any]:
     try:
-        field = model_class._meta.get_field(field_name)
+        # ``get_field`` also returns reverse relations and generic FKs, which
+        # carry neither ``verbose_name`` nor ``choices``. The ``except`` below
+        # is what handles those, so the reference stays deliberately untyped
+        # rather than growing an isinstance ladder that changes nothing.
+        field: Any = model_class._meta.get_field(field_name)
         label = field.verbose_name.title()
 
         # Handle choices
@@ -99,11 +109,17 @@ def resolve_field_value(model_class, field_name, value):
     return label, value or "—"
 
 
-def get_user_display(log):
-    return getattr(log.user, "username", None) or log.meta.get("username") or "System"
+def get_user_display(log: AuditLog) -> str:
+    # ``AuditLog`` has a ``user_id`` column but no ``user`` relation, so the
+    # attribute is fetched defensively: a bare ``log.user`` raised
+    # ``AttributeError`` on a real row (only the MagicMock-based tests hid
+    # it). ``meta`` is nullable, hence the ``or {}`` before the lookup.
+    user = getattr(log, "user", None)
+    meta = log.meta or {}
+    return getattr(user, "username", None) or meta.get("username") or "System"
 
 
-def render_log_changes(log):
+def render_log_changes(log: AuditLog) -> str | SafeString:
     model_class = model_for_table(log.table_name)
     if model_class is None:
         return "—"

@@ -34,9 +34,7 @@ if not django_settings.configured:
             "django.contrib.messages",
             "auditrum.integrations.django",
         ],
-        DATABASES={
-            "default": {"ENGINE": "django.db.backends.sqlite3", "NAME": ":memory:"}
-        },
+        DATABASES={"default": {"ENGINE": "django.db.backends.sqlite3", "NAME": ":memory:"}},
         ROOT_URLCONF="django.contrib.contenttypes.urls",
         TEMPLATES=[
             {
@@ -117,7 +115,7 @@ class TestSetVar:
 
 class TestLink:
     def test_escapes_href_and_text(self):
-        out = link('<script>alert("x")</script>', '<b>boom</b>')
+        out = link('<script>alert("x")</script>', "<b>boom</b>")
         # format_html escapes HTML-unsafe characters in both args.
         assert "<script>" not in out
         assert "&lt;" in out
@@ -163,9 +161,7 @@ class TestResolveFieldValue:
         # ``django.utils.timezone`` has no ``.datetime`` attribute.
         from auditrum.integrations.django.models import AuditLog
 
-        label, formatted = resolve_field_value(
-            AuditLog, "changed_at", "2024-06-01T12:00:00+00:00"
-        )
+        label, formatted = resolve_field_value(AuditLog, "changed_at", "2024-06-01T12:00:00+00:00")
         assert label  # verbose_name.title()
         # The formatter produced *something*; we don't pin the exact
         # locale-formatted string.
@@ -174,9 +170,7 @@ class TestResolveFieldValue:
     def test_charfield_value_passes_through(self):
         from auditrum.integrations.django.models import AuditLog
 
-        label, formatted = resolve_field_value(
-            AuditLog, "operation", "INSERT"
-        )
+        label, formatted = resolve_field_value(AuditLog, "operation", "INSERT")
         assert label == "Operation"
         assert formatted == "INSERT"
 
@@ -189,9 +183,7 @@ class TestResolveFieldValue:
     def test_unknown_field_falls_through_gracefully(self):
         from auditrum.integrations.django.models import AuditLog
 
-        label, formatted = resolve_field_value(
-            AuditLog, "definitely_not_a_field", "x"
-        )
+        label, formatted = resolve_field_value(AuditLog, "definitely_not_a_field", "x")
         # Exception path: label falls back to the field name, value passes
         # through.
         assert label == "definitely_not_a_field"

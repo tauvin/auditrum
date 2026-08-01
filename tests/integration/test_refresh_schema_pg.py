@@ -52,10 +52,7 @@ def configured_django_pg(pg_dsn):
     }
 
     if django_settings.configured:
-        if (
-            django_settings.DATABASES.get("default", {}).get("ENGINE")
-            != pg_db_settings["ENGINE"]
-        ):
+        if django_settings.DATABASES.get("default", {}).get("ENGINE") != pg_db_settings["ENGINE"]:
             pytest.skip(
                 "Django is already configured with a non-Postgres backend. "
                 "Run integration tests in isolation: pytest tests/integration/"
@@ -115,9 +112,7 @@ def _read_function_body(conn, name: str) -> str:
     return row[0]
 
 
-def test_refresh_command_replaces_stale_jsonb_diff(
-    fresh_auditlog, configured_django_pg
-):
+def test_refresh_command_replaces_stale_jsonb_diff(fresh_auditlog, configured_django_pg):
     from django.core.management import call_command
 
     conn = fresh_auditlog
@@ -135,9 +130,7 @@ def test_refresh_command_replaces_stale_jsonb_diff(
     assert "jsonb_object_agg(key, value)" not in refreshed_body
 
 
-def test_migration_0003_replaces_stale_jsonb_diff(
-    fresh_auditlog, configured_django_pg
-):
+def test_migration_0003_replaces_stale_jsonb_diff(fresh_auditlog, configured_django_pg):
     """The same regression covered at the migration-graph level.
 
     Imitates a user running ``migrate`` after upgrading from 0.3
@@ -156,9 +149,7 @@ def test_migration_0003_replaces_stale_jsonb_diff(
     with conn.cursor() as cur:
         cur.execute(_STALE_JSONB_DIFF)
 
-    assert "jsonb_object_agg(key, value)" in _read_function_body(
-        conn, "jsonb_diff"
-    )
+    assert "jsonb_object_agg(key, value)" in _read_function_body(conn, "jsonb_diff")
 
     migration = importlib.import_module(
         "auditrum.integrations.django.migrations.0003_refresh_schema_04"

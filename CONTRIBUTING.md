@@ -59,7 +59,7 @@ every issue, PR, and bug report genuinely helps.
 
 ```bash
 # One-time setup
-uv sync --extra django --extra sqlalchemy --extra observability --extra test
+uv sync --extra django --extra sqlalchemy --extra observability --extra test --extra typecheck
 
 # Unit tests (fast — no Postgres needed; uses sqlite + mocks)
 uv run pytest tests/ -q --ignore=tests/integration
@@ -67,11 +67,14 @@ uv run pytest tests/ -q --ignore=tests/integration
 # Integration tests (requires Docker — uses testcontainers[postgres])
 uv run pytest tests/integration/ -q
 
-# Type gate
-uv run ty check
+# Type gate (--min-severity warn makes warnings fail, same as CI)
+uv run pyrefly check --min-severity warn
 
 # Lint
 uvx ruff@0.15 check .
+
+# Format gate (CI runs --check; drop the flag to actually reformat)
+uvx ruff@0.15 format --check .
 ```
 
 The CI matrix in ``.github/workflows/ci.yml`` is the reference for
@@ -122,12 +125,13 @@ security-relevant issue, email the address in
 
 ## Code style quick reference
 
-* Python ≥ 3.11, typed strictly — ``ty`` checks ``auditrum/`` core
-  and ``auditrum/integrations/django/``. Any new code should be
-  type-clean.
+* Python ≥ 3.11, typed strictly — ``pyrefly`` checks all of
+  ``auditrum/``, including the SQLAlchemy and observability
+  integrations. The package ships ``py.typed``, so every public
+  callable needs annotations and any new code has to be type-clean.
 * Prefer module-level imports; function-scoped imports only as a
   workaround for circular imports or heavy optional deps.
-* No ``# noqa: …`` / ``# type: ignore[…]`` / ``# ty: ignore[…]``
+* No ``# noqa: …`` / ``# type: ignore[…]`` / ``# pyrefly: ignore[…]``
   without a comment explaining *why* (future contributors need to
   know whether to keep it).
 * No new prints / debug log statements left in a PR.

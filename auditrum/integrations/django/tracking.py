@@ -11,6 +11,7 @@ Example::
 
     from auditrum.integrations.django import track
 
+
     @track(fields=["status", "total"], extra_meta=["tenant_id"])
     class Order(models.Model):
         status = models.CharField(max_length=32)
@@ -49,13 +50,9 @@ def _model_key(model_cls: type[Model]) -> str:
     return f"{model_cls.__module__}.{model_cls.__qualname__}"
 
 
-def _build_filter(
-    fields: list[str] | None, exclude: list[str] | None
-) -> FieldFilter:
+def _build_filter(fields: list[str] | None, exclude: list[str] | None) -> FieldFilter:
     if fields is not None and exclude is not None:
-        raise ValueError(
-            "track(): cannot pass both `fields` and `exclude` — choose one"
-        )
+        raise ValueError("track(): cannot pass both `fields` and `exclude` — choose one")
     if fields is not None:
         return FieldFilter.only(*fields)
     if exclude is not None:

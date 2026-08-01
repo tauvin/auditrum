@@ -13,7 +13,7 @@ from __future__ import annotations
 import hashlib
 import re
 from dataclasses import dataclass, field
-from typing import Literal
+from typing import Any, Literal
 
 from auditrum.tracking._template import render
 
@@ -43,9 +43,7 @@ def validate_identifier(name: str, label: str) -> str:
     those — never let user input through this function.
     """
     if not isinstance(name, str) or not _IDENT_RE.match(name):
-        raise ValueError(
-            f"Invalid {label}: {name!r} (must match {_IDENT_RE.pattern})"
-        )
+        raise ValueError(f"Invalid {label}: {name!r} (must match {_IDENT_RE.pattern})")
     return name
 
 
@@ -162,19 +160,13 @@ class TrackSpec:
     def _meta_expr(self) -> str:
         if not self.extra_meta_fields:
             return "NULL"
-        pairs = ", ".join(
-            f"'{f}', to_jsonb(NEW.{f})" for f in self.extra_meta_fields
-        )
+        pairs = ", ".join(f"'{f}', to_jsonb(NEW.{f})" for f in self.extra_meta_fields)
         return f"jsonb_build_object({pairs})"
 
     def _log_conditions_block(self) -> str:
         if self.log_condition is None:
             return ""
-        return (
-            f"\n    IF NOT ({self.log_condition}) THEN\n"
-            f"        RETURN NULL;\n"
-            f"    END IF;\n"
-        )
+        return f"\n    IF NOT ({self.log_condition}) THEN\n        RETURN NULL;\n    END IF;\n"
 
     def build(self) -> TriggerBundle:
         """Render install/uninstall SQL + compute a drift-detection checksum."""
@@ -205,7 +197,7 @@ class TrackSpec:
             checksum=checksum,
         )
 
-    def to_fingerprint(self) -> dict:
+    def to_fingerprint(self) -> dict[str, Any]:
         """Serialize the spec to a JSON-safe dict for tracking-table storage."""
         return {
             "table": self.table,

@@ -23,12 +23,7 @@ def chain_table(fresh_auditlog):
     conn = fresh_auditlog
     with conn.cursor() as cur:
         cur.execute("DROP TABLE IF EXISTS chain_bench CASCADE")
-        cur.execute(
-            "CREATE TABLE chain_bench ("
-            "id serial PRIMARY KEY, "
-            "payload text NOT NULL"
-            ")"
-        )
+        cur.execute("CREATE TABLE chain_bench (id serial PRIMARY KEY, payload text NOT NULL)")
         cur.execute(generate_trigger_sql("chain_bench"))
         # Hash chain installs a BEFORE INSERT trigger on auditlog
         # itself — one chain per audit_table, not per tracked table.
@@ -44,9 +39,7 @@ def test_insert_without_chain(benchmark, fresh_auditlog):
     conn = fresh_auditlog
     with conn.cursor() as cur:
         cur.execute("DROP TABLE IF EXISTS chain_baseline CASCADE")
-        cur.execute(
-            "CREATE TABLE chain_baseline (id serial PRIMARY KEY, payload text)"
-        )
+        cur.execute("CREATE TABLE chain_baseline (id serial PRIMARY KEY, payload text)")
         cur.execute(generate_trigger_sql("chain_baseline"))
 
     def run():

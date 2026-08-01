@@ -12,8 +12,10 @@ Example::
     from prometheus_client import REGISTRY, start_http_server
     from auditrum.observability.prometheus import AuditrumCollector
 
+
     def _conn_factory():
         return psycopg.connect("postgresql://…")
+
 
     REGISTRY.register(AuditrumCollector(_conn_factory, window_seconds=60))
     start_http_server(9090)

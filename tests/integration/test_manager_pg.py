@@ -30,27 +30,19 @@ class TestManagerAgainstRealPostgres:
     def test_for_object_returns_rows_for_that_instance_only(self, users_with_trigger):
         conn = users_with_trigger
         with conn.cursor() as cur:
-            cur.execute(
-                "INSERT INTO app_users (name, email) VALUES ('a', 'a@x.com') RETURNING id"
-            )
+            cur.execute("INSERT INTO app_users (name, email) VALUES ('a', 'a@x.com') RETURNING id")
             user_a = cur.fetchone()[0]
-            cur.execute(
-                "INSERT INTO app_users (name, email) VALUES ('b', 'b@x.com') RETURNING id"
-            )
+            cur.execute("INSERT INTO app_users (name, email) VALUES ('b', 'b@x.com') RETURNING id")
             user_b = cur.fetchone()[0]
-            cur.execute(
-                "UPDATE app_users SET email = 'a2@x.com' WHERE id = %s", (user_a,)
-            )
+            cur.execute("UPDATE app_users SET email = 'a2@x.com' WHERE id = %s", (user_a,))
 
             cur.execute(
-                "SELECT COUNT(*) FROM auditlog "
-                "WHERE table_name = %s AND object_id = %s",
+                "SELECT COUNT(*) FROM auditlog WHERE table_name = %s AND object_id = %s",
                 ("app_users", str(user_a)),
             )
             count_a = cur.fetchone()[0]
             cur.execute(
-                "SELECT COUNT(*) FROM auditlog "
-                "WHERE table_name = %s AND object_id = %s",
+                "SELECT COUNT(*) FROM auditlog WHERE table_name = %s AND object_id = %s",
                 ("app_users", str(user_b)),
             )
             count_b = cur.fetchone()[0]
@@ -74,8 +66,7 @@ class TestManagerAgainstRealPostgres:
             )
             cur.execute("INSERT INTO app_users (name) VALUES ('by-user-123')")
             cur.execute(
-                "SELECT user_id FROM auditlog WHERE table_name='app_users' "
-                "ORDER BY id DESC LIMIT 1"
+                "SELECT user_id FROM auditlog WHERE table_name='app_users' ORDER BY id DESC LIMIT 1"
             )
             user_id = cur.fetchone()[0]
         assert user_id == 123

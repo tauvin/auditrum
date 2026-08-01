@@ -1,4 +1,4 @@
-from collections.abc import Iterator
+from collections.abc import Generator
 from contextlib import contextmanager
 from typing import Any
 
@@ -33,7 +33,7 @@ class DjangoExecutor:
         self._connection = connection
 
     @contextmanager
-    def cursor(self) -> Iterator[Any]:
+    def cursor(self) -> Generator[Any]:
         if self._connection is None:
             from django.db import connection as default_connection
 

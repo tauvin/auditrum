@@ -13,6 +13,7 @@ matching the old shape but the underlying state lives in
 
 from __future__ import annotations
 
+from collections.abc import ItemsView, Iterator, KeysView, ValuesView
 from typing import Any
 
 from django.db.models import Model
@@ -33,14 +34,14 @@ def register(model_cls: type[Model], **kwargs: Any) -> None:
     _imperative_register(model_cls, **kwargs)
 
 
-class _LegacyRegistryView(dict):
+class _LegacyRegistryView(dict[type[Model], dict[str, Any]]):
     """Dict proxy exposing the tracking registry in the old dict-of-dicts shape."""
 
-    def _snapshot(self) -> dict:
+    def _snapshot(self) -> dict[type[Model], dict[str, Any]]:
         # Build a Django-model-keyed view of the current spec registry
         from django.apps import apps
 
-        out = {}
+        out: dict[type[Model], dict[str, Any]] = {}
         models_by_table = {m._meta.db_table: m for m in apps.get_models()}
         for _, spec in _spec_registry.items():
             model = models_by_table.get(spec.table)
@@ -49,9 +50,7 @@ class _LegacyRegistryView(dict):
             out[model] = {
                 "table_name": spec.table,
                 "fields": [f.name for f in model._meta.get_fields() if f.concrete],
-                "track_only": (
-                    list(spec.fields.fields) if spec.fields.kind == "only" else None
-                ),
+                "track_only": (list(spec.fields.fields) if spec.fields.kind == "only" else None),
                 "exclude_fields": (
                     list(spec.fields.fields) if spec.fields.kind == "exclude" else None
                 ),
@@ -60,25 +59,25 @@ class _LegacyRegistryView(dict):
             }
         return out
 
-    def __iter__(self):
+    def __iter__(self) -> Iterator[type[Model]]:
         return iter(self._snapshot())
 
-    def __len__(self):
+    def __len__(self) -> int:
         return len(self._snapshot())
 
-    def __contains__(self, key):
+    def __contains__(self, key: object) -> bool:
         return key in self._snapshot()
 
-    def __getitem__(self, key):
+    def __getitem__(self, key: type[Model]) -> dict[str, Any]:
         return self._snapshot()[key]
 
-    def keys(self):  # type: ignore[override]
+    def keys(self) -> KeysView[type[Model]]:  # type: ignore[override]
         return self._snapshot().keys()
 
-    def values(self):  # type: ignore[override]
+    def values(self) -> ValuesView[dict[str, Any]]:  # type: ignore[override]
         return self._snapshot().values()
 
-    def items(self):  # type: ignore[override]
+    def items(self) -> ItemsView[type[Model], dict[str, Any]]:  # type: ignore[override]
         return self._snapshot().items()
 
 

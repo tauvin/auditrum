@@ -13,8 +13,8 @@ name: CI
 # every supported Django is covered with a valid combination — Django 4.2
 # tops out at Python 3.12 and Django 6.0 requires Python 3.12+, so the
 # old-Python cells run 4.2/5.2 and the 3.14 cell runs 6.0. The typecheck
-# and lint jobs stay single-cell: the ty gate is pinned to Python 3.11
-# and ruff is version-independent.
+# and lint jobs stay single-cell: the pyrefly gate is pinned to Python
+# 3.11 and ruff is version-independent.
 on:
   push:
     branches: [main]
@@ -27,7 +27,7 @@ concurrency:
 
 jobs:
   typecheck:
-    name: ty (Python 3.11)
+    name: pyrefly (Python 3.11)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
@@ -45,21 +45,32 @@ jobs:
       - name: Set up Python 3.11
         run: uv python install 3.11
 
-      # typecheck + django are the only extras the ty gate needs —
-      # SQLAlchemy and observability are excluded from ty.toml's src
-      # roots. Keeping the install minimal makes the job quick and
-      # surfaces accidental dependency creep into the typed surface.
+      # The pyrefly gate covers the whole shipped package, so every
+      # optional integration's imports have to resolve — django,
+      # sqlalchemy and observability all get installed here. Missing one
+      # would turn its module into unresolved imports rather than a
+      # checked surface, which is exactly what py.typed promises we do.
       - name: Install typecheck dependencies
-        run: uv sync --python 3.11 --extra typecheck --extra django
+        run: |
+          uv sync --python 3.11 \
+            --extra typecheck \
+            --extra django \
+            --extra sqlalchemy \
+            --extra observability
 
       # --output-format github emits GitHub Actions annotation lines so
       # failures show up inline in the PR diff, not buried in the job log.
+      # --min-severity warn promotes warnings into the reported set, so a
+      # new warning fails the job the same way an error does (the gate the
+      # old ty config expressed as error-on-warning).
       # --no-sync + --python 3.11 reuses the venv from the previous step;
       # without them uv defaults to the latest Python satisfying
       # requires-python (3.13) and re-syncs without the typecheck extra,
-      # which removes `ty` and breaks the run.
-      - name: Run ty
-        run: uv run --no-sync --python 3.11 ty check --output-format github
+      # which removes `pyrefly` and breaks the run.
+      - name: Run pyrefly
+        run: |
+          uv run --no-sync --python 3.11 \
+            pyrefly check --min-severity warn --output-format github
 
   test:
     name: Tests (PG ${{ matrix.pg }}, Py ${{ matrix.python }}, Django ${{ matrix.django }})
@@ -145,3 +156,11 @@ jobs:
       # dependency graph.
       - name: Ruff check
         run: uvx ruff@0.15 check .
+
+      # The tree was brought fully under `ruff format` in the 0.5.x typing
+      # pass; this step keeps it that way. It runs after the lint step and
+      # is not `if: always()` on purpose — a lint failure is the more
+      # actionable signal, and formatting drift is trivially fixed by
+      # running `uvx ruff@0.15 format .` locally.
+      - name: Ruff format check
+        run: uvx ruff@0.15 format --check .

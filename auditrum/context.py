@@ -1,12 +1,12 @@
 import inspect
 import re
-from collections.abc import Callable
+from collections.abc import Callable, Generator, Iterable
 from contextlib import contextmanager
 from contextvars import ContextVar
 from functools import wraps
-from typing import Any
+from typing import Any, ParamSpec, TypeVar, cast
 
-from auditrum.executor import ConnectionExecutor, NullExecutor
+from auditrum.executor import ConnectionExecutor, CursorProtocol, NullExecutor
 
 __all__ = [
     "AuditContext",
@@ -17,12 +17,17 @@ __all__ = [
 
 _IDENT_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
+# Used by the ``with_context`` / ``with_change_reason`` decorators to keep the
+# decorated callable's signature intact for downstream type checkers.
+_P = ParamSpec("_P")
+_R = TypeVar("_R")
+
 
 def _is_valid_key(key: str) -> bool:
     return isinstance(key, str) and bool(_IDENT_RE.match(key))
 
 
-def _apply_ctx(cursor, items: dict[str, Any]) -> None:
+def _apply_ctx(cursor: CursorProtocol, items: dict[str, Any]) -> None:
     """Apply key/value pairs as transaction-local GUCs via ``set_config()``.
 
     Uses ``is_local=true`` so values are bound to the current transaction
@@ -48,7 +53,7 @@ def _apply_ctx(cursor, items: dict[str, Any]) -> None:
         )
 
 
-def _reset_ctx(cursor, keys) -> None:
+def _reset_ctx(cursor: CursorProtocol, keys: Iterable[str]) -> None:
     """Best-effort reset of transaction-local GUCs.
 
     With ``is_local=true`` the GUCs auto-reset on transaction end, so
@@ -63,7 +68,7 @@ def _reset_ctx(cursor, keys) -> None:
 
 
 class AuditContext:
-    def __init__(self, executor: ConnectionExecutor | None = None):
+    def __init__(self, executor: ConnectionExecutor | None = None) -> None:
         self._data: ContextVar[dict[str, Any]] = ContextVar("audit_ctx_data")
         self._reason_stack: ContextVar[list[str]] = ContextVar("audit_ctx_reason")
         self._executor: ConnectionExecutor = executor or NullExecutor()
@@ -79,7 +84,7 @@ class AuditContext:
     def get_executor(self) -> ConnectionExecutor:
         return self._executor
 
-    def _ensure_data(self) -> dict:
+    def _ensure_data(self) -> dict[str, Any]:
         try:
             return self._data.get()
         except LookupError:
@@ -127,7 +132,7 @@ class AuditContext:
         ``psql`` debugging — production code should use :meth:`use`.
         """
         items = self._build_items()
-        lines = []
+        lines: list[str] = []
         for k, v in items.items():
             if not _is_valid_key(k):
                 continue
@@ -136,7 +141,7 @@ class AuditContext:
         return "\n".join(lines)
 
     @contextmanager
-    def use(self, reset: bool = True, **kwargs):
+    def use(self, reset: bool = True, **kwargs: Any) -> Generator[None]:
         original_data = self._ensure_data().copy()
         ctx = original_data.copy()
         ctx.update(kwargs)
@@ -155,7 +160,7 @@ class AuditContext:
                     _reset_ctx(cursor, applied_items.keys())
 
     @contextmanager
-    def use_change_reason(self, reason: str, reset: bool = True):
+    def use_change_reason(self, reason: str, reset: bool = True) -> Generator[None]:
         original_stack = self._ensure_reason_stack().copy()
         stack = original_stack.copy()
         stack.append(reason)
@@ -179,7 +184,7 @@ class AuditContext:
 audit_context = AuditContext()
 
 
-def with_context(**kwargs):
+def with_context(**kwargs: Any) -> Callable[[Callable[_P, _R]], Callable[_P, _R]]:
     """Decorator that wraps the call in an :meth:`AuditContext.use` block.
 
     Detects ``async def`` targets via :func:`inspect.iscoroutinefunction`
@@ -189,18 +194,21 @@ def with_context(**kwargs):
     the task.
     """
 
-    def decorator(func: Callable):
+    def decorator(func: Callable[_P, _R]) -> Callable[_P, _R]:
         if inspect.iscoroutinefunction(func):
 
             @wraps(func)
-            async def awrapper(*args, **fkwargs):
+            async def awrapper(*args: _P.args, **fkwargs: _P.kwargs) -> Any:
                 with audit_context.use(**kwargs):
                     return await func(*args, **fkwargs)
 
-            return awrapper
+            # The async branch returns a coroutine function whose awaited
+            # value is what ``_R`` unwraps to; the checker can't tie those
+            # together through ``iscoroutinefunction``, so assert it here.
+            return cast("Callable[_P, _R]", awrapper)
 
         @wraps(func)
-        def wrapper(*args, **fkwargs):
+        def wrapper(*args: _P.args, **fkwargs: _P.kwargs) -> _R:
             with audit_context.use(**kwargs):
                 return func(*args, **fkwargs)
 
@@ -209,25 +217,25 @@ def with_context(**kwargs):
     return decorator
 
 
-def with_change_reason(reason: str):
+def with_change_reason(reason: str) -> Callable[[Callable[_P, _R]], Callable[_P, _R]]:
     """Decorator that stamps a ``change_reason`` onto every audit event.
 
     Mirrors :func:`with_context`'s coroutine handling so the reason is
     not lost across an ``await`` boundary.
     """
 
-    def decorator(func: Callable):
+    def decorator(func: Callable[_P, _R]) -> Callable[_P, _R]:
         if inspect.iscoroutinefunction(func):
 
             @wraps(func)
-            async def awrapper(*args, **kwargs):
+            async def awrapper(*args: _P.args, **kwargs: _P.kwargs) -> Any:
                 with audit_context.use_change_reason(reason):
                     return await func(*args, **kwargs)
 
-            return awrapper
+            return cast("Callable[_P, _R]", awrapper)
 
         @wraps(func)
-        def wrapper(*args, **kwargs):
+        def wrapper(*args: _P.args, **kwargs: _P.kwargs) -> _R:
             with audit_context.use_change_reason(reason):
                 return func(*args, **kwargs)
 

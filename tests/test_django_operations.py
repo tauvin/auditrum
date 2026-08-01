@@ -118,9 +118,7 @@ class TestInstallTriggerDeconstruct:
         assert rebuilt.spec == op.spec
 
     def test_roundtrip_with_fields(self):
-        op = InstallTrigger(
-            table="users", fields_kind="only", fields=["name", "email"]
-        )
+        op = InstallTrigger(table="users", fields_kind="only", fields=["name", "email"])
         _, _, kwargs = op.deconstruct()
         assert kwargs["fields_kind"] == "only"
         assert kwargs["fields"] == ["name", "email"]

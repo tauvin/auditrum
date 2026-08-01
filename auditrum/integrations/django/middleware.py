@@ -1,12 +1,31 @@
 import hashlib
 import hmac
 import uuid
-from typing import Any
+from collections.abc import Callable
+from typing import TYPE_CHECKING, Any, cast
 
 from django.conf import settings as django_settings
+from django.http import HttpRequest, HttpResponse
 
 from auditrum.integrations.django.runtime import auditrum_context
 from auditrum.integrations.django.settings import audit_settings
+
+# Django's middleware contract: the next callable in the chain.
+_GetResponse = Callable[[HttpRequest], HttpResponse]
+
+
+if TYPE_CHECKING:
+
+    class _RequestWithID(HttpRequest):
+        """An ``HttpRequest`` after ``request_id`` has been stamped on it.
+
+        ``RequestIDMiddleware`` adds the attribute at runtime; declaring the
+        shape here lets both middlewares read and write it without widening
+        their public signatures away from ``HttpRequest``.
+        """
+
+        request_id: str
+
 
 __all__ = [
     "AuditrumMiddleware",
@@ -43,12 +62,12 @@ def _hash_session_key(session_key: str | None) -> str | None:
 class RequestIDMiddleware:
     """Attach a stable ``request_id`` to the request object."""
 
-    def __init__(self, get_response):
+    def __init__(self, get_response: _GetResponse) -> None:
         self.get_response = get_response
 
-    def __call__(self, request):
+    def __call__(self, request: HttpRequest) -> HttpResponse:
         if not getattr(request, "request_id", None):
-            request.request_id = str(uuid.uuid4())
+            cast("_RequestWithID", request).request_id = str(uuid.uuid4())
         return self.get_response(request)
 
 
@@ -76,14 +95,14 @@ class AuditrumMiddleware:
       for strict GDPR setups.
     """
 
-    def __init__(self, get_response):
+    def __init__(self, get_response: _GetResponse) -> None:
         self.get_response = get_response
 
-    def get_context(self, request) -> dict[str, Any]:
+    def get_context(self, request: HttpRequest) -> dict[str, Any]:
         user = getattr(request, "user", None)
         session = getattr(request, "session", None)
         request_id = getattr(request, "request_id", None) or str(uuid.uuid4())
-        request.request_id = request_id
+        cast("_RequestWithID", request).request_id = request_id
 
         raw_session_key = getattr(session, "session_key", None)
         if audit_settings.hash_session_key:
@@ -105,7 +124,7 @@ class AuditrumMiddleware:
             ctx["user_agent"] = request.META.get("HTTP_USER_AGENT")
         return ctx
 
-    def __call__(self, request):
+    def __call__(self, request: HttpRequest) -> HttpResponse:
         if request.method not in audit_settings.middleware_methods:
             return self.get_response(request)
 

@@ -15,7 +15,9 @@ the PL/pgSQL helper bodies are refreshed here.
 
 from __future__ import annotations
 
-from django.core.management.base import BaseCommand
+from typing import Any
+
+from django.core.management.base import BaseCommand, CommandParser
 from django.db import connection
 
 from auditrum.integrations.django.settings import audit_settings
@@ -37,14 +39,14 @@ class Command(BaseCommand):
         "installed Python release."
     )
 
-    def add_arguments(self, parser):
+    def add_arguments(self, parser: CommandParser) -> None:
         parser.add_argument(
             "--dry-run",
             action="store_true",
             help="Print the SQL that would be executed and exit.",
         )
 
-    def handle(self, *args, **options):
+    def handle(self, *args: Any, **options: Any) -> None:
         sqls: list[tuple[str, str]] = [
             ("jsonb_diff", generate_jsonb_diff_function_sql()),
             (

@@ -19,7 +19,7 @@ from importlib.resources import files
 from typing import Any
 
 
-class _StrictMap(dict):
+class _StrictMap(dict[str, Any]):
     """``dict`` subclass whose ``__missing__`` raises with a helpful message.
 
     Used with :meth:`str.format_map` so templates never render with

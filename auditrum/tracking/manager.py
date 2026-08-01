@@ -19,7 +19,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
 
-from auditrum.executor import ConnectionExecutor
+from auditrum.executor import ConnectionExecutor, CursorProtocol
 from auditrum.tracking.spec import TrackSpec, TriggerBundle, validate_identifier
 
 __all__ = [
@@ -91,9 +91,9 @@ class TriggerManager:
     Usage::
 
         mgr = TriggerManager(executor)
-        mgr.bootstrap()              # idempotent: creates tracking table
-        mgr.sync([spec1, spec2])     # install/update/skip based on checksums
-        mgr.inspect(spec1)           # -> TriggerStatus
+        mgr.bootstrap()  # idempotent: creates tracking table
+        mgr.sync([spec1, spec2])  # install/update/skip based on checksums
+        mgr.inspect(spec1)  # -> TriggerStatus
         mgr.uninstall(spec1)
 
     All operations go through the supplied :class:`ConnectionExecutor`, so
@@ -175,7 +175,7 @@ class TriggerManager:
     # Inspection
     # ------------------------------------------------------------------
 
-    def _fetch_stored(self, trigger_name: str) -> tuple[str, dict] | None:
+    def _fetch_stored(self, trigger_name: str) -> tuple[str, dict[str, Any]] | None:
         """Return ``(checksum, fingerprint)`` or ``None`` if not tracked."""
         with self.executor.cursor() as cur:
             cur.execute(
@@ -202,7 +202,7 @@ class TriggerManager:
             return TriggerStatus.INSTALLED
         return TriggerStatus.DRIFT
 
-    def list_installed(self) -> list[dict]:
+    def list_installed(self) -> list[dict[str, Any]]:
         """Return all rows from the tracking table as dicts (for CLI output)."""
         with self.executor.cursor() as cur:
             cur.execute(
@@ -210,7 +210,7 @@ class TriggerManager:
                 f"FROM {self.tracking_table} ORDER BY trigger_name"
             )
             rows = cur.fetchall()
-        result: list[dict] = []
+        result: list[dict[str, Any]] = []
         for name, tbl, checksum, applied_at, fp in rows:
             if isinstance(fp, str):
                 fp = json.loads(fp)
@@ -229,7 +229,7 @@ class TriggerManager:
     # Install / Uninstall
     # ------------------------------------------------------------------
 
-    def _acquire_lock(self, cur, trigger_name: str) -> None:
+    def _acquire_lock(self, cur: CursorProtocol, trigger_name: str) -> None:
         """Acquire a session-level advisory lock keyed by trigger name.
 
         Serialises concurrent installs of the same trigger so two racing
@@ -250,7 +250,7 @@ class TriggerManager:
             (trigger_name,),
         )
 
-    def _release_lock(self, cur, trigger_name: str) -> None:
+    def _release_lock(self, cur: CursorProtocol, trigger_name: str) -> None:
         """Release the session-level advisory lock acquired by :meth:`_acquire_lock`."""
         cur.execute(
             "SELECT pg_advisory_unlock(hashtextextended(%s, 0))",
@@ -258,7 +258,7 @@ class TriggerManager:
         )
 
     def _upsert_tracking(
-        self, cur, bundle: TriggerBundle, fingerprint: dict[str, Any]
+        self, cur: CursorProtocol, bundle: TriggerBundle, fingerprint: dict[str, Any]
     ) -> None:
         cur.execute(
             f"INSERT INTO {self.tracking_table} "
@@ -276,7 +276,7 @@ class TriggerManager:
             ),
         )
 
-    def _delete_tracking(self, cur, trigger_name: str) -> None:
+    def _delete_tracking(self, cur: CursorProtocol, trigger_name: str) -> None:
         cur.execute(
             f"DELETE FROM {self.tracking_table} WHERE trigger_name = %s",
             (trigger_name,),
@@ -352,9 +352,7 @@ class TriggerManager:
     # Batch ops
     # ------------------------------------------------------------------
 
-    def diff(
-        self, specs: list[TrackSpec], *, prune: bool = False
-    ) -> list[DiffEntry]:
+    def diff(self, specs: list[TrackSpec], *, prune: bool = False) -> list[DiffEntry]:
         """Return the list of changes ``sync()`` would apply.
 
         If ``prune=True``, triggers present in the tracking table but not
@@ -410,9 +408,7 @@ class TriggerManager:
 
         return entries
 
-    def sync(
-        self, specs: list[TrackSpec], *, prune: bool = False
-    ) -> SyncReport:
+    def sync(self, specs: list[TrackSpec], *, prune: bool = False) -> SyncReport:
         """Idempotent batch install / update / optional prune.
 
         Returns a :class:`SyncReport` summarizing what was done. Drift is

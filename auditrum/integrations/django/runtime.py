@@ -37,15 +37,22 @@ import contextlib
 import json
 import logging
 import uuid
-from collections.abc import Mapping
-from contextvars import ContextVar
+from collections.abc import Callable, Mapping
+from contextvars import ContextVar, Token
 from dataclasses import dataclass, field
 from types import MappingProxyType
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from django.db import connection, transaction
 
 from auditrum.integrations.django.settings import audit_settings
+
+if TYPE_CHECKING:
+    from django.db.backends.base.base import BaseDatabaseWrapper
+
+# Signature of the ``execute`` callable Django hands to an
+# ``connection.execute_wrapper`` callback: ``(sql, params, many, context)``.
+_ExecuteCallable = Callable[[Any, Any, bool, dict[str, Any]], Any]
 
 logger = logging.getLogger(__name__)
 
@@ -56,7 +63,7 @@ __all__ = [
 ]
 
 
-def _ensure_wrapper_registered(conn) -> None:
+def _ensure_wrapper_registered(conn: BaseDatabaseWrapper) -> None:
     """Register :func:`_inject_audit_context` on a ``DatabaseWrapper``
     if not already present.
 
@@ -73,7 +80,11 @@ def _ensure_wrapper_registered(conn) -> None:
         wrappers.append(_inject_audit_context)
 
 
-def _on_connection_created(sender, connection, **kwargs) -> None:  # noqa: ARG001
+def _on_connection_created(
+    sender: object,
+    connection: BaseDatabaseWrapper,
+    **kwargs: Any,
+) -> None:  # noqa: ARG001
     """``django.db.backends.signals.connection_created`` handler.
 
     Auto-wires the audit context wrapper onto every freshly-
@@ -85,6 +96,12 @@ def _on_connection_created(sender, connection, **kwargs) -> None:  # noqa: ARG00
     signal keeps new ones covered.
     """
     _ensure_wrapper_registered(connection)
+
+
+def _empty_metadata() -> Mapping[str, Any]:
+    """Default ``_Context.metadata`` — an immutable, empty mapping."""
+    empty: dict[str, Any] = {}
+    return MappingProxyType(empty)
 
 
 @dataclass(frozen=True)
@@ -99,7 +116,7 @@ class _Context:
     """
 
     id: uuid.UUID
-    metadata: Mapping[str, Any] = field(default_factory=lambda: MappingProxyType({}))
+    metadata: Mapping[str, Any] = field(default_factory=_empty_metadata)
 
 
 _tracker: ContextVar[_Context | None] = ContextVar("auditrum_tracker", default=None)
@@ -136,7 +153,7 @@ def _is_ignored_statement(sql: str | bytes) -> bool:
     return text.strip().lower().startswith(IGNORED_SQL_PREFIXES)
 
 
-def _is_transaction_errored(cursor) -> bool:
+def _is_transaction_errored(cursor: Any) -> bool:
     try:
         import psycopg.pq
 
@@ -145,7 +162,7 @@ def _is_transaction_errored(cursor) -> bool:
         return False
 
 
-def _can_inject_variable(cursor, sql: str | bytes) -> bool:
+def _can_inject_variable(cursor: Any, sql: str | bytes) -> bool:
     """Match pghistory's injection safety rules."""
     return (
         not _is_ignored_statement(sql)
@@ -154,7 +171,13 @@ def _can_inject_variable(cursor, sql: str | bytes) -> bool:
     )
 
 
-def _inject_audit_context(execute, sql, params, many, context):
+def _inject_audit_context(
+    execute: _ExecuteCallable,
+    sql: str | bytes,
+    params: Any,
+    many: bool,
+    context: dict[str, Any],
+) -> Any:
     """Prepend ``SET LOCAL``-style config calls to every query.
 
     Registered once per ``DatabaseWrapper`` via the
@@ -301,7 +324,7 @@ class auditrum_context(contextlib.ContextDecorator):
 
     def __init__(self, **metadata: Any) -> None:
         self.metadata: dict[str, Any] = dict(metadata)
-        self._token = None
+        self._token: Token[_Context | None] | None = None
 
     def __enter__(self) -> _Context:
         existing = _tracker.get()
@@ -344,7 +367,7 @@ class auditrum_context(contextlib.ContextDecorator):
         self._token = _tracker.set(merged_ctx)
         return merged_ctx
 
-    def __exit__(self, *exc) -> None:
+    def __exit__(self, *exc: object) -> None:
         # The wrapper stays registered on the connection for its
         # lifetime — it's a no-op when ``_tracker.get() is None``, so
         # there's nothing to "clean up" on exit beyond resetting the

@@ -55,12 +55,8 @@ def parallel_audit_setup(pg_dsn, pg_conn):
         cur.execute(generate_audit_attach_context_sql("audit_context"))
         cur.execute(generate_audit_current_user_id_sql())
         cur.execute(generate_auditlog_partitions_sql("auditlog", months_ahead=1))
-        cur.execute(
-            "CREATE TABLE conc_widgets (id serial PRIMARY KEY, name text)"
-        )
-        cur.execute(
-            "CREATE TABLE conc_orders (id serial PRIMARY KEY, status text)"
-        )
+        cur.execute("CREATE TABLE conc_widgets (id serial PRIMARY KEY, name text)")
+        cur.execute("CREATE TABLE conc_orders (id serial PRIMARY KEY, status text)")
     yield pg_dsn
     with pg_conn.cursor() as cur:
         cur.execute("DROP TABLE IF EXISTS auditlog CASCADE")
@@ -121,8 +117,7 @@ class TestParallelSync:
         # Verify: tracking table has exactly one row for this trigger
         with psycopg.connect(dsn) as conn, conn.cursor() as cur:
             cur.execute(
-                "SELECT COUNT(*) FROM auditrum_applied_triggers "
-                "WHERE trigger_name = %s",
+                "SELECT COUNT(*) FROM auditrum_applied_triggers WHERE trigger_name = %s",
                 ("audit_conc_widgets_trigger",),
             )
             assert cur.fetchone()[0] == 1
@@ -136,14 +131,10 @@ class TestParallelSync:
 
             # Verify: trigger actually fires when we touch the tracked table
             cur.execute("INSERT INTO conc_widgets (name) VALUES ('parallel-test')")
-            cur.execute(
-                "SELECT COUNT(*) FROM auditlog WHERE table_name = 'conc_widgets'"
-            )
+            cur.execute("SELECT COUNT(*) FROM auditlog WHERE table_name = 'conc_widgets'")
             assert cur.fetchone()[0] == 1
 
-    def test_parallel_syncs_different_specs_both_install(
-        self, parallel_audit_setup
-    ):
+    def test_parallel_syncs_different_specs_both_install(self, parallel_audit_setup):
         """Two parallel syncs with disjoint spec lists must both succeed
         and produce two tracking rows. The advisory locks are per-trigger
         so different triggers don't block each other."""
@@ -158,18 +149,14 @@ class TestParallelSync:
             ]
             reports = [f.result(timeout=30) for f in as_completed(futures)]
 
-        all_installed = sorted(
-            name for r in reports for name in r["installed"]
-        )
+        all_installed = sorted(name for r in reports for name in r["installed"])
         assert all_installed == [
             "audit_conc_orders_trigger",
             "audit_conc_widgets_trigger",
         ]
 
         with psycopg.connect(dsn) as conn, conn.cursor() as cur:
-            cur.execute(
-                "SELECT trigger_name FROM auditrum_applied_triggers ORDER BY trigger_name"
-            )
+            cur.execute("SELECT trigger_name FROM auditrum_applied_triggers ORDER BY trigger_name")
             tracked = [row[0] for row in cur.fetchall()]
         assert tracked == [
             "audit_conc_orders_trigger",
@@ -183,16 +170,13 @@ class TestParallelSync:
         spec = TrackSpec(table="conc_widgets")
 
         with ThreadPoolExecutor(max_workers=8) as pool:
-            futures = [
-                pool.submit(_sync_in_own_connection, dsn, spec) for _ in range(8)
-            ]
+            futures = [pool.submit(_sync_in_own_connection, dsn, spec) for _ in range(8)]
             for f in as_completed(futures):
                 f.result(timeout=30)
 
         with psycopg.connect(dsn) as conn, conn.cursor() as cur:
             cur.execute(
-                "SELECT COUNT(*) FROM auditrum_applied_triggers "
-                "WHERE trigger_name = %s",
+                "SELECT COUNT(*) FROM auditrum_applied_triggers WHERE trigger_name = %s",
                 ("audit_conc_widgets_trigger",),
             )
             assert cur.fetchone()[0] == 1

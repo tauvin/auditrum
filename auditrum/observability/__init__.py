@@ -13,6 +13,7 @@ Usage::
     # Prometheus: register a collector with prometheus_client
     from auditrum.observability.prometheus import AuditrumCollector
     from prometheus_client import REGISTRY
+
     REGISTRY.register(AuditrumCollector(conn_factory=lambda: psycopg.connect(dsn)))
 
     # Sentry: add breadcrumbs for audit context entries

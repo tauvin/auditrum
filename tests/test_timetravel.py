@@ -83,20 +83,12 @@ class TestReconstructTable:
             ("2", {"id": 2, "name": "bob"}),
         ]
         conn = _conn(_cursor(rows))
-        result = list(
-            reconstruct_table(
-                conn, table="users", at=datetime(2024, 1, 1, tzinfo=UTC)
-            )
-        )
+        result = list(reconstruct_table(conn, table="users", at=datetime(2024, 1, 1, tzinfo=UTC)))
         assert result == rows
 
     def test_empty_table(self):
         conn = _conn(_cursor([]))
-        result = list(
-            reconstruct_table(
-                conn, table="users", at=datetime(2024, 1, 1, tzinfo=UTC)
-            )
-        )
+        result = list(reconstruct_table(conn, table="users", at=datetime(2024, 1, 1, tzinfo=UTC)))
         assert result == []
 
     def test_calls_set_returning_function(self):
@@ -124,9 +116,7 @@ class TestReconstructFieldHistory:
             ),
         ]
         conn = _conn(_cursor(rows))
-        history = reconstruct_field_history(
-            conn, table="users", object_id="42", field="email"
-        )
+        history = reconstruct_field_history(conn, table="users", object_id="42", field="email")
         assert history == [
             (insert_ts, "a@x.com"),
             (update_ts, "a2@x.com"),
@@ -154,9 +144,7 @@ class TestReconstructFieldHistory:
             ),
         ]
         conn = _conn(_cursor(rows))
-        history = reconstruct_field_history(
-            conn, table="users", object_id="42", field="email"
-        )
+        history = reconstruct_field_history(conn, table="users", object_id="42", field="email")
         assert len(history) == 2
         assert history[0][1] == "a@x.com"
         assert history[1][1] == "a2@x.com"
@@ -169,14 +157,10 @@ class TestReconstructFieldHistory:
             (delete_ts, "DELETE", {"email": "a@x.com"}, None, None),
         ]
         conn = _conn(_cursor(rows))
-        history = reconstruct_field_history(
-            conn, table="users", object_id="42", field="email"
-        )
+        history = reconstruct_field_history(conn, table="users", object_id="42", field="email")
         assert history[-1] == (delete_ts, None)
 
     def test_rejects_injection(self):
         conn = _conn(_cursor([]))
         with pytest.raises(ValueError, match="Invalid"):
-            reconstruct_field_history(
-                conn, table="users", object_id="42", field="email; DROP"
-            )
+            reconstruct_field_history(conn, table="users", object_id="42", field="email; DROP")

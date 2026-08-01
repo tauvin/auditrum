@@ -25,9 +25,7 @@ if not django_settings.configured:
             "django.contrib.messages",
             "auditrum.integrations.django",
         ],
-        DATABASES={
-            "default": {"ENGINE": "django.db.backends.sqlite3", "NAME": ":memory:"}
-        },
+        DATABASES={"default": {"ENGINE": "django.db.backends.sqlite3", "NAME": ":memory:"}},
         ROOT_URLCONF="django.contrib.contenttypes.urls",
         TEMPLATES=[
             {
@@ -52,9 +50,7 @@ class TestRegisterPassthrough:
 
             __qualname__ = "DummyModel"
 
-        with patch(
-            "auditrum.integrations.django.audit._imperative_register"
-        ) as mock:
+        with patch("auditrum.integrations.django.audit._imperative_register") as mock:
             register(DummyModel, extra_meta_fields=["x"])
 
         args, kwargs = mock.call_args
@@ -77,9 +73,7 @@ class TestLegacyRegistryView:
             def __init__(self, name: str):
                 self.name = name
 
-        _Meta.get_fields = staticmethod(
-            lambda: [_Field("id"), _Field("name"), _Field("status")]
-        )
+        _Meta.get_fields = staticmethod(lambda: [_Field("id"), _Field("name"), _Field("status")])
 
         class Model:
             pass
@@ -105,9 +99,7 @@ class TestLegacyRegistryView:
             table="orders",
             fields=FieldFilter.only("name", "status"),
         )
-        reg, get_models = self._stub_registry_with(
-            {spec.effective_trigger_name: spec}, [model]
-        )
+        reg, get_models = self._stub_registry_with({spec.effective_trigger_name: spec}, [model])
         with reg, get_models:
             snap = dict(registry.items())
 
@@ -124,9 +116,7 @@ class TestLegacyRegistryView:
             table="invoices",
             fields=FieldFilter.exclude("internal_notes"),
         )
-        reg, get_models = self._stub_registry_with(
-            {spec.effective_trigger_name: spec}, [model]
-        )
+        reg, get_models = self._stub_registry_with({spec.effective_trigger_name: spec}, [model])
         with reg, get_models:
             snap = dict(registry.items())
 
@@ -136,9 +126,7 @@ class TestLegacyRegistryView:
 
     def test_snapshot_skips_specs_without_matching_model(self):
         spec = TrackSpec(table="orphan_table")
-        reg, get_models = self._stub_registry_with(
-            {spec.effective_trigger_name: spec}, []
-        )
+        reg, get_models = self._stub_registry_with({spec.effective_trigger_name: spec}, [])
         with reg, get_models:
             snap = dict(registry.items())
 
@@ -147,9 +135,7 @@ class TestLegacyRegistryView:
     def test_iter_and_len_reflect_snapshot(self):
         model = self._fake_model("widgets")
         spec = TrackSpec(table="widgets")
-        reg, get_models = self._stub_registry_with(
-            {spec.effective_trigger_name: spec}, [model]
-        )
+        reg, get_models = self._stub_registry_with({spec.effective_trigger_name: spec}, [model])
         with reg, get_models:
             assert len(registry) == 1
             assert list(iter(registry)) == [model]
@@ -158,9 +144,7 @@ class TestLegacyRegistryView:
     def test_keys_and_values_mirror_items(self):
         model = self._fake_model("widgets")
         spec = TrackSpec(table="widgets")
-        reg, get_models = self._stub_registry_with(
-            {spec.effective_trigger_name: spec}, [model]
-        )
+        reg, get_models = self._stub_registry_with({spec.effective_trigger_name: spec}, [model])
         with reg, get_models:
             keys = list(registry.keys())
             values = list(registry.values())
@@ -172,9 +156,7 @@ class TestLegacyRegistryView:
     def test_getitem_returns_row(self):
         model = self._fake_model("widgets")
         spec = TrackSpec(table="widgets", log_condition="status != 'archived'")
-        reg, get_models = self._stub_registry_with(
-            {spec.effective_trigger_name: spec}, [model]
-        )
+        reg, get_models = self._stub_registry_with({spec.effective_trigger_name: spec}, [model])
         with reg, get_models:
             row = registry[model]
         assert row["log_conditions"] == "status != 'archived'"

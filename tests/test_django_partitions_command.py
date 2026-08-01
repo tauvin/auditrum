@@ -3,7 +3,7 @@
 
 We mock ``psycopg.connect`` so the test runs without a live database;
 the generation path (``generate_auditlog_partitions_sql``) is exercised
-and the ``# ty: ignore[invalid-argument-type]`` trust-boundary line is
+and the ``# pyrefly: ignore[no-matching-overload]`` trust-boundary line is
 verified to call ``cursor.execute`` with the generated SQL.
 """
 

@@ -11,19 +11,11 @@ def users_with_history(fresh_auditlog):
     conn = fresh_auditlog
     with conn.cursor() as cur:
         cur.execute("DROP TABLE IF EXISTS app_users CASCADE")
-        cur.execute(
-            "CREATE TABLE app_users ("
-            "id serial PRIMARY KEY, "
-            "name text, "
-            "email text"
-            ")"
-        )
+        cur.execute("CREATE TABLE app_users (id serial PRIMARY KEY, name text, email text)")
         cur.execute(generate_trigger_sql("app_users"))
 
         # Seed a row and mutate it a few times
-        cur.execute(
-            "INSERT INTO app_users (name, email) VALUES ('alice', 'a@x.com') RETURNING id"
-        )
+        cur.execute("INSERT INTO app_users (name, email) VALUES ('alice', 'a@x.com') RETURNING id")
         user_id = cur.fetchone()[0]
         cur.execute("UPDATE app_users SET email = 'a2@x.com' WHERE id = %s", (user_id,))
         cur.execute(

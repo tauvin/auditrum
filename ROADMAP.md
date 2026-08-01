@@ -124,11 +124,14 @@ later.
 - [x] **Resolve the ``_validate_ident`` situation.** Kept
   ``validate_identifier`` as the permanent public name and removed
   the underscore-prefixed alias outright (breaking; pre-1.0 is fine).
-- [x] **Strict type checker in CI.** ``ty`` (Astral, pinned
-  ``0.0.31``) with ``error-on-warning = true`` covers
-  ``auditrum/`` core and ``auditrum/integrations/django/``.
-  SQLAlchemy and observability helpers excluded per
-  public-experimental status.
+- [x] **Strict type checker in CI.** Originally ``ty`` (Astral,
+  pinned ``0.0.31``) with ``error-on-warning = true``, covering
+  ``auditrum/`` core and ``auditrum/integrations/django/`` only.
+  **Superseded in 0.5.x:** the gate is ``pyrefly`` (pinned
+  ``1.2.0``) run with ``--min-severity warn`` — same
+  warnings-are-fatal contract — and it now covers the *whole*
+  package, SQLAlchemy and observability helpers included, so the
+  shipped ``py.typed`` marker is backed end to end.
 - [x] **Hypothesis property-based tests** for the trigger generator:
   identifier fuzz, ``FieldFilter`` combinatorics, ``TrackSpec.build``
   checksum stability, render → parse round-trip via ``pglast``.
@@ -160,7 +163,7 @@ later.
     mutate row → admin history view" path (catches the whole class
     of bug that slipped through unit tests).
 
-**Done when:** ``ty`` and the coverage gate pass in CI;
+**Done when:** the type gate and the coverage gate pass in CI;
 ``api-stability.md`` is published; catalog runs on 0.4 without new
 bug reports caused by the cleanup.
 
@@ -168,9 +171,9 @@ bug reports caused by the cleanup.
 everything after it depends on a stable surface.
 
 **Note on ``pyright``:** dropped from 0.4 and from the roadmap
-entirely — ``ty`` covers our needs, and running two type checkers in
-CI doubles the failure modes without doubling the signal. Decision
-locked in 2026-04-23; see Open questions below.
+entirely — a single type gate covers our needs, and running two type
+checkers in CI doubles the failure modes without doubling the signal.
+Decision locked in 2026-04-23; see Open questions below.
 
 ---
 
@@ -463,10 +466,10 @@ These are decisions that affect roadmap shape but haven't been made:
    pre-1.0 is fine). Canonical name is
    ``auditrum.tracking.spec.validate_identifier``.
 2. ~~**Second type checker (``pyright``) as an opinion in CI?**~~
-   **Resolved 2026-04-23:** no. ``ty`` is the only type gate. Running
-   two catches marginally more bugs while doubling the failure modes
-   and the maintenance cost of ``ty: ignore`` / ``pyright: ignore``
-   pragma drift.
+   **Resolved 2026-04-23:** no. There is exactly one type gate
+   (``ty`` then, ``pyrefly`` from 0.5.x). Running two catches
+   marginally more bugs while doubling the failure modes and the
+   maintenance cost of per-checker ``ignore`` pragma drift.
 3. ~~**Documentation hosting.**~~ **Resolved 2026-04-23:** GitHub
    Pages. Same repo, no external service to manage, deploy via
    ``mkdocs gh-deploy`` in a release workflow. Revisit only if the

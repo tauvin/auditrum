@@ -51,7 +51,7 @@ def audit_task(*, source: str = "task", **metadata: Any):
     enqueues the task.
     """
 
-    def decorator(func: Callable) -> Callable:
+    def decorator(func: Callable[..., Any]) -> Callable[..., Any]:
         if inspect.iscoroutinefunction(func):
 
             @wraps(func)
@@ -98,7 +98,7 @@ def install_celery_signals(*, source: str = "celery") -> None:
     # Imported lazily so auditrum stays a non-Celery-dep package. ty
     # doesn't see Celery in the typecheck env — the import is a runtime
     # concern, not a typing one.
-    from celery.signals import (  # ty: ignore[unresolved-import]  # noqa: PLC0415
+    from celery.signals import (  # pyrefly: ignore[missing-import]  # noqa: PLC0415
         task_failure,
         task_postrun,
         task_prerun,

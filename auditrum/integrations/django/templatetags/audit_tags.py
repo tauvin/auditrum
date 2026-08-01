@@ -1,13 +1,15 @@
+from typing import Any
+
 from django import template
 
 register = template.Library()
 
 
 @register.simple_tag
-def render_diff(diff: dict) -> str:
+def render_diff(diff: dict[str, Any] | None) -> str:
     if not diff:
         return "-"
-    lines = []
+    lines: list[str] = []
     for field, values in diff.items():
         old, new = values
         lines.append(f"{field}: {old} → {new}")
@@ -15,7 +17,7 @@ def render_diff(diff: dict) -> str:
 
 
 @register.filter
-def changed_fields(diff):
+def changed_fields(diff: dict[str, Any] | None) -> dict[str, Any]:
     """Drop diff entries whose ``old`` equals ``new`` (e.g. null→null from the
     synthetic INSERT diff). UPDATE diffs already exclude unchanged fields."""
     if not diff:

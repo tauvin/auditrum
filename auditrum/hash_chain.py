@@ -200,7 +200,7 @@ FOR EACH ROW EXECUTE FUNCTION {fn_name}();
 """.strip()
 
 
-def get_chain_tip(conn: Any, table_name: str = "auditlog") -> dict:
+def get_chain_tip(conn: Any, table_name: str = "auditlog") -> dict[str, Any]:
     """Return the current tip of the hash chain.
 
     ``conn`` accepts a psycopg ``Connection`` OR a Django connection —
@@ -251,8 +251,8 @@ def verify_chain(
     conn: Any,
     table_name: str = "auditlog",
     *,
-    expected_tip: dict | None = None,
-) -> dict:
+    expected_tip: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     """Verify the hash chain on the audit log using server-side recomputation.
 
     ``conn`` accepts a psycopg ``Connection`` OR a Django connection —

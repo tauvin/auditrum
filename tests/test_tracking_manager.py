@@ -98,10 +98,7 @@ class TestBootstrap:
     def test_creates_tracking_table(self, mgr):
         mgr.bootstrap()
         statements = [sql for sql, _ in mgr.executor.state["executed"]]
-        assert any(
-            "CREATE TABLE IF NOT EXISTS auditrum_applied_triggers" in s
-            for s in statements
-        )
+        assert any("CREATE TABLE IF NOT EXISTS auditrum_applied_triggers" in s for s in statements)
 
     def test_idempotent(self, mgr):
         mgr.bootstrap()

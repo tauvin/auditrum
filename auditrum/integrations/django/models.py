@@ -1,5 +1,5 @@
 import uuid
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, ClassVar
 
 from django.db import models
 
@@ -17,7 +17,7 @@ __all__ = [
 ]
 
 
-class AuditLogQuerySet(models.QuerySet):
+class AuditLogQuerySet(models.QuerySet["AuditLog"]):
     """QuerySet with single-table-aware helpers for audit history lookups.
 
     All methods return chainable querysets so callers can compose them with
@@ -62,12 +62,21 @@ class AuditLogQuerySet(models.QuerySet):
         return self.order_by("-changed_at", "-id")[:limit]
 
 
-class AuditLogManager(models.Manager.from_queryset(AuditLogQuerySet)):  # ty: ignore[unsupported-base]
-    # Manager.from_queryset() returns a dynamically-built subclass whose
-    # identity type checkers can't statically infer. The pattern is the
-    # standard Django idiom for copying queryset methods onto a manager,
-    # so we accept the base-class unknown here rather than duplicate
-    # every QuerySet method on the manager by hand.
+# ``Manager.from_queryset()`` builds its base class at runtime, so a type
+# checker cannot see which methods land on the manager — every
+# ``AuditLog.objects.for_object(...)`` call would be an unknown attribute.
+# Declaring the queryset as a static base under TYPE_CHECKING gives the
+# checker the exact method set ``from_queryset`` copies over, while runtime
+# keeps the standard Django idiom (and its manager/queryset semantics).
+if TYPE_CHECKING:
+
+    class _AuditLogManagerBase(models.Manager["AuditLog"], AuditLogQuerySet): ...
+
+else:
+    _AuditLogManagerBase = models.Manager.from_queryset(AuditLogQuerySet)
+
+
+class AuditLogManager(_AuditLogManagerBase):
     """Default manager for :class:`AuditLog` exposing the queryset helpers."""
 
     def get_queryset(self) -> AuditLogQuerySet:
@@ -86,6 +95,13 @@ class AuditContext(models.Model):
     metadata = models.JSONField(default=dict)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
+
+    if TYPE_CHECKING:
+        # Reverse accessor for ``AuditLog.context`` (``related_name="events"``).
+        # Django creates it at class-preparation time, which a static checker
+        # cannot see — declaring it here makes ``ctx.events`` typed for us and
+        # for downstream projects reading our ``py.typed``.
+        events: models.Manager["AuditLog"]
 
     class Meta:
         db_table = audit_settings.context_table_name
@@ -117,7 +133,11 @@ class AuditLog(models.Model):
     )
     meta = models.JSONField(null=True, blank=True)
 
-    objects = AuditLogManager()
+    # Annotated as a ClassVar so the narrowed manager type wins over the
+    # ``Manager[Self]`` that ``models.Model`` declares — without it a checker
+    # resolves ``AuditLog.objects`` to the base manager and loses every
+    # ``AuditLogQuerySet`` helper.
+    objects: ClassVar[AuditLogManager] = AuditLogManager()
 
     class Meta:
         db_table = audit_settings.table_name

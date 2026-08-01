@@ -44,7 +44,7 @@ class AuditSettings:
         return _validate_guc_name(value, "PGAUDIT_GUC_METADATA")
 
     @property
-    def middleware_methods(self) -> tuple:
+    def middleware_methods(self) -> tuple[str, ...]:
         return tuple(
             getattr(
                 settings, "PGAUDIT_MIDDLEWARE_METHODS", ("GET", "POST", "PUT", "PATCH", "DELETE")

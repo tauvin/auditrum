@@ -14,11 +14,15 @@ self-contained — no import-time registry lookup at ``migrate`` time.
 
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from django.db.migrations.operations.base import Operation
 
 from auditrum.tracking import FieldFilter, TrackSpec, TriggerManager
+
+if TYPE_CHECKING:
+    from django.db.backends.base.schema import BaseDatabaseSchemaEditor
+    from django.db.migrations.state import ProjectState
 
 __all__ = [
     "InstallTrigger",
@@ -68,7 +72,7 @@ def _kwargs_to_spec(
     )
 
 
-def _make_manager(schema_editor) -> TriggerManager:
+def _make_manager(schema_editor: BaseDatabaseSchemaEditor) -> TriggerManager:
     from auditrum.integrations.django.executor import DjangoExecutor
 
     # ``schema_editor.connection`` is a Django ``DatabaseWrapper`` for the
@@ -111,20 +115,32 @@ class InstallTrigger(Operation):
             trigger_name=trigger_name,
         )
 
-    def deconstruct(self):
+    def deconstruct(self) -> tuple[str, list[Any], dict[str, Any]]:
         kwargs = _spec_to_deconstruct_kwargs(self.spec)
         return (self.__class__.__name__, [], kwargs)
 
-    def state_forwards(self, app_label, state):
+    def state_forwards(self, app_label: str, state: ProjectState) -> None:
         # Triggers don't alter the Django model graph — nothing to do.
         pass
 
-    def database_forwards(self, app_label, schema_editor, from_state, to_state):
+    def database_forwards(
+        self,
+        app_label: str,
+        schema_editor: BaseDatabaseSchemaEditor,
+        from_state: ProjectState,
+        to_state: ProjectState,
+    ) -> None:
         mgr = _make_manager(schema_editor)
         mgr.bootstrap()
         mgr.install(self.spec, force=True)
 
-    def database_backwards(self, app_label, schema_editor, from_state, to_state):
+    def database_backwards(
+        self,
+        app_label: str,
+        schema_editor: BaseDatabaseSchemaEditor,
+        from_state: ProjectState,
+        to_state: ProjectState,
+    ) -> None:
         mgr = _make_manager(schema_editor)
         mgr.bootstrap()
         mgr.uninstall(self.spec)
@@ -165,19 +181,31 @@ class UninstallTrigger(Operation):
             trigger_name=trigger_name,
         )
 
-    def deconstruct(self):
+    def deconstruct(self) -> tuple[str, list[Any], dict[str, Any]]:
         kwargs = _spec_to_deconstruct_kwargs(self.spec)
         return (self.__class__.__name__, [], kwargs)
 
-    def state_forwards(self, app_label, state):
+    def state_forwards(self, app_label: str, state: ProjectState) -> None:
         pass
 
-    def database_forwards(self, app_label, schema_editor, from_state, to_state):
+    def database_forwards(
+        self,
+        app_label: str,
+        schema_editor: BaseDatabaseSchemaEditor,
+        from_state: ProjectState,
+        to_state: ProjectState,
+    ) -> None:
         mgr = _make_manager(schema_editor)
         mgr.bootstrap()
         mgr.uninstall(self.spec)
 
-    def database_backwards(self, app_label, schema_editor, from_state, to_state):
+    def database_backwards(
+        self,
+        app_label: str,
+        schema_editor: BaseDatabaseSchemaEditor,
+        from_state: ProjectState,
+        to_state: ProjectState,
+    ) -> None:
         mgr = _make_manager(schema_editor)
         mgr.bootstrap()
         mgr.install(self.spec, force=True)

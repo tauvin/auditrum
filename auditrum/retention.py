@@ -23,6 +23,7 @@ from datetime import UTC, datetime
 from dateutil.relativedelta import relativedelta
 from psycopg import sql
 
+from auditrum.executor import ConnectionProtocol
 from auditrum.tracking.spec import validate_identifier
 
 __all__ = [
@@ -87,7 +88,7 @@ def generate_purge_sql(table_name: str, older_than: str) -> sql.Composed:
     )
 
 
-def drop_old_partitions(conn, table_name: str, older_than: str) -> list[str]:
+def drop_old_partitions(conn: ConnectionProtocol, table_name: str, older_than: str) -> list[str]:
     """Drop month partitions whose upper bound is older than the cutoff.
 
     Returns the list of dropped partition names. Connects via the supplied

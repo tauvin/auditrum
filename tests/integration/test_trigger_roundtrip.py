@@ -102,8 +102,9 @@ class TestTriggerRoundtrip:
             cur.execute(
                 "INSERT INTO users (name, email, password) VALUES ('c', 'c@x.com', 'secret')"
             )
-            cur.execute("UPDATE users SET password = 'new-secret', email = 'c2@x.com' "
-                        "WHERE name = 'c'")
+            cur.execute(
+                "UPDATE users SET password = 'new-secret', email = 'c2@x.com' WHERE name = 'c'"
+            )
             cur.execute("SELECT diff FROM auditlog WHERE operation = 'UPDATE'")
             diff = cur.fetchone()[0]
         assert "password" not in diff
@@ -134,9 +135,7 @@ class TestTriggerRoundtrip:
                 (ctx_uuid, metadata_json),
             )
             cur.execute("INSERT INTO users (name) VALUES ('e')")
-            cur.execute(
-                "SELECT context_id FROM auditlog ORDER BY id DESC LIMIT 1"
-            )
+            cur.execute("SELECT context_id FROM auditlog ORDER BY id DESC LIMIT 1")
             audit_ctx_id = cur.fetchone()[0]
         assert str(audit_ctx_id) == ctx_uuid
         with conn.cursor() as cur:

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterator
+from collections.abc import Generator
 from contextlib import contextmanager
 from typing import TYPE_CHECKING, Any
 
@@ -47,7 +47,7 @@ class _SQLAlchemyCursor:
 
     def __init__(self, conn: Connection) -> None:
         self._conn = conn
-        self._last_result = None
+        self._last_result: Any = None
 
     def execute(self, sql: str, params: Any = None) -> None:
         from sqlalchemy import text
@@ -85,7 +85,7 @@ class _SQLAlchemyCursor:
             return None
         return self._last_result.fetchone()
 
-    def fetchall(self) -> list:
+    def fetchall(self) -> list[Any]:
         if self._last_result is None:
             return []
         return self._last_result.fetchall()
@@ -108,7 +108,7 @@ class SQLAlchemyExecutor:
         self._conn = conn
 
     @contextmanager
-    def cursor(self) -> Iterator[_SQLAlchemyCursor]:
+    def cursor(self) -> Generator[_SQLAlchemyCursor]:
         cur = _SQLAlchemyCursor(self._conn)
         try:
             yield cur

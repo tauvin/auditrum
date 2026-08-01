@@ -20,7 +20,8 @@ Example::
 
     meta = MetaData()
     users = Table(
-        "users", meta,
+        "users",
+        meta,
         Column("id", Integer, primary_key=True),
         Column("email", String),
     )

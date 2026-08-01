@@ -45,6 +45,7 @@ from typing import Any
 
 from psycopg import sql as pg_sql
 
+from auditrum.executor import ConnectionProtocol
 from auditrum.tracking.spec import validate_identifier
 
 __all__ = [
@@ -107,7 +108,7 @@ class HistoricalRow:
 
 
 def reconstruct_row(
-    conn,
+    conn: ConnectionProtocol,
     *,
     table: str,
     object_id: Any,
@@ -139,7 +140,7 @@ def reconstruct_row(
 
 
 def reconstruct_table(
-    conn,
+    conn: ConnectionProtocol,
     *,
     table: str,
     at: datetime,
@@ -177,12 +178,18 @@ def reconstruct_table(
         # truncated hash could clash across concurrent streams and raise
         # ``DuplicateCursor``.
         cursor_name = f"auditrum_tt_{uuid.uuid4().hex}"
+        # Named cursors and explicit ``transaction()`` blocks are psycopg
+        # features that ConnectionProtocol deliberately does not promise —
+        # a Django DatabaseWrapper has neither, which is why the docstring
+        # tells those callers to use ``stream=False``. Widen locally so the
+        # psycopg-only surface is reachable without loosening the signature.
+        pg_conn: Any = conn
         # DECLARE CURSOR must run inside a transaction. If the connection is
         # in autocommit mode it has no open transaction, so open one for the
         # lifetime of the stream (#13). Connections that manage their own
         # transaction (autocommit off) are left untouched.
-        tx = conn.transaction() if getattr(conn, "autocommit", False) else nullcontext()
-        with tx, conn.cursor(name=cursor_name) as cur:
+        tx = pg_conn.transaction() if getattr(conn, "autocommit", False) else nullcontext()
+        with tx, pg_conn.cursor(name=cursor_name) as cur:
             cur.itersize = int(batch_size)
             cur.execute(sql, (table, at))
             for object_id, row_data in cur:
@@ -200,7 +207,7 @@ def reconstruct_table(
 
 
 def reconstruct_field_history(
-    conn,
+    conn: ConnectionProtocol,
     *,
     table: str,
     object_id: Any,

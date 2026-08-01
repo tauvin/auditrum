@@ -1,4 +1,4 @@
-from collections.abc import Iterator
+from collections.abc import Generator
 from contextlib import contextmanager
 from typing import Any
 
@@ -8,7 +8,7 @@ __all__ = ["audit_tracked"]
 
 
 @contextmanager
-def audit_tracked(**kwargs: Any) -> Iterator[None]:
+def audit_tracked(**kwargs: Any) -> Generator[None]:
     """Set transaction-local audit context for manual or automated actions.
 
     Useful for management commands, cron jobs, shell sessions, and other

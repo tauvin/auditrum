@@ -33,6 +33,8 @@ are frozen at the 0.4 revision.
 """
 
 from django.db import migrations
+from django.db.backends.base.schema import BaseDatabaseSchemaEditor
+from django.db.migrations.state import StateApps
 
 from auditrum.integrations.django.settings import audit_settings
 from auditrum.schema import (
@@ -43,7 +45,7 @@ from auditrum.schema import (
 )
 
 
-def _refresh_schema(apps, schema_editor):
+def _refresh_schema(apps: StateApps, schema_editor: BaseDatabaseSchemaEditor) -> None:
     """Re-execute the current release's PL/pgSQL helper bodies.
 
     Runs under the migration role's privileges (the admin role per

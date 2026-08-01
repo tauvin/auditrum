@@ -191,9 +191,7 @@ class TestAuditrumMakemigrationsLoadability:
         migrations_dir = self._patch_app_to_tmp_dir(monkeypatch, tmp_path)
 
         out = StringIO()
-        call_command(
-            "auditrum_makemigrations", "--name", "loadable_test", stdout=out
-        )
+        call_command("auditrum_makemigrations", "--name", "loadable_test", stdout=out)
 
         files = list(migrations_dir.glob("*_loadable_test.py"))
         assert len(files) == 1, f"expected one generated file, got {files}"
@@ -202,9 +200,7 @@ class TestAuditrumMakemigrationsLoadability:
         # Must compile to bytecode without syntax errors
         compile(content, str(files[0]), "exec")
 
-    def test_generated_file_imports_and_exposes_migration(
-        self, tmp_path, monkeypatch
-    ):
+    def test_generated_file_imports_and_exposes_migration(self, tmp_path, monkeypatch):
         from django.contrib.auth.models import User
 
         track(fields=["username"])(User)
@@ -254,9 +250,7 @@ class TestAuditrumMakemigrationsLoadability:
         migrations_dir = self._patch_app_to_tmp_dir(monkeypatch, tmp_path)
 
         out = StringIO()
-        call_command(
-            "auditrum_makemigrations", "--name", "extra_meta_test", stdout=out
-        )
+        call_command("auditrum_makemigrations", "--name", "extra_meta_test", stdout=out)
 
         files = list(migrations_dir.glob("*_extra_meta_test.py"))
         module = self._load_module(files[0])

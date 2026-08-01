@@ -24,6 +24,7 @@ from typing import Any, Literal
 
 from psycopg import sql as pg_sql
 
+from auditrum.executor import ConnectionProtocol
 from auditrum.tracking.spec import validate_identifier
 
 __all__ = [
@@ -49,7 +50,7 @@ class BlameEntry:
 
 
 def fetch_blame(
-    conn,
+    conn: ConnectionProtocol,
     *,
     table: str,
     object_id: str,
@@ -265,6 +266,7 @@ def _render_actor(entry: BlameEntry, *, rich: bool = False) -> str:
     user-controlled and must be escaped against rich-markup injection
     when ``rich`` mode is on.
     """
+
     def _safe(text: object) -> str:
         return _escape_rich(text) if rich else ("" if text is None else str(text))
 

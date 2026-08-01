@@ -36,18 +36,12 @@ def populated_history(fresh_auditlog):
     conn = fresh_auditlog
     with conn.cursor() as cur:
         cur.execute("DROP TABLE IF EXISTS tt_bench CASCADE")
-        cur.execute(
-            "CREATE TABLE tt_bench (id serial PRIMARY KEY, status text, count integer)"
-        )
+        cur.execute("CREATE TABLE tt_bench (id serial PRIMARY KEY, status text, count integer)")
         cur.execute(generate_trigger_sql("tt_bench"))
-        cur.execute(
-            "INSERT INTO tt_bench (status, count) VALUES ('new', 0) RETURNING id"
-        )
+        cur.execute("INSERT INTO tt_bench (status, count) VALUES ('new', 0) RETURNING id")
         (row_id,) = cur.fetchone()
         for i in range(1, 101):
-            cur.execute(
-                "UPDATE tt_bench SET count = %s WHERE id = %s", (i, row_id)
-            )
+            cur.execute("UPDATE tt_bench SET count = %s WHERE id = %s", (i, row_id))
     return conn, row_id
 
 
@@ -69,8 +63,6 @@ def test_reconstruct_field_history(benchmark, populated_history):
     conn, row_id = populated_history
 
     def run():
-        reconstruct_field_history(
-            conn, table="tt_bench", object_id=str(row_id), field="count"
-        )
+        reconstruct_field_history(conn, table="tt_bench", object_id=str(row_id), field="count")
 
     benchmark(run)

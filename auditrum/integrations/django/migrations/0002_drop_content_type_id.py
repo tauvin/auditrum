@@ -10,10 +10,7 @@ class Migration(migrations.Migration):
 
     operations = [
         migrations.RunSQL(
-            sql=(
-                f"ALTER TABLE {audit_settings.table_name} "
-                "DROP COLUMN IF EXISTS content_type_id;"
-            ),
+            sql=(f"ALTER TABLE {audit_settings.table_name} DROP COLUMN IF EXISTS content_type_id;"),
             reverse_sql=(
                 f"ALTER TABLE {audit_settings.table_name} "
                 "ADD COLUMN IF NOT EXISTS content_type_id integer;"

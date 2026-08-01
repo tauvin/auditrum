@@ -8,6 +8,65 @@ the API stabilises.
 
 ## [Unreleased]
 
+### Added
+
+- **The package ships ``py.typed`` (PEP 561).** Inline annotations are now
+  authoritative for downstream type checkers: importing auditrum in a typed
+  project gives real types instead of implicit ``Any``. The marker is
+  included in the wheel and the distribution carries the
+  ``Typing :: Typed`` classifier.
+- **Full annotation coverage across the package.** Every module under
+  ``auditrum/`` — core, Django integration, SQLAlchemy and observability
+  alike — now passes the type gate under pyrefly's ``strict`` preset, which
+  makes an unannotated parameter, a bare ``list`` / ``dict`` type argument
+  or an untyped empty container an error rather than a silent ``Any``.
+  Notable public-surface improvements:
+  - ``with_context`` / ``with_change_reason`` are typed with ``ParamSpec``,
+    so the decorated callable keeps its signature.
+  - New ``auditrum.executor.ConnectionProtocol`` documents (and types) the
+    duck-typed ``conn`` argument that ``timetravel`` / ``blame`` / ``revert``
+    / ``retention`` accept — a psycopg ``Connection`` or a Django
+    ``DatabaseWrapper``.
+  - ``AuditLog.objects`` resolves to ``AuditLogManager``, so the
+    ``AuditLogQuerySet`` helpers (``for_object``, ``for_user``, …) are
+    visible to type checkers; ``AuditContext.events`` is declared too.
+- **``0005_model_state`` migration** — see *Fixed* below.
+
+### Changed
+
+- **Type gate moved from ``ty`` to ``pyrefly`` (pinned ``1.2.0``).** CI runs
+  ``pyrefly check --min-severity warn``, which keeps the previous
+  warnings-are-fatal contract that ``ty``'s ``error-on-warning`` provided.
+  The gate's scope widened from "core + Django" to the whole package, so
+  the SQLAlchemy and observability modules are no longer excluded. Existing
+  ``# ty: ignore[...]`` pragmas became ``# pyrefly: ignore[...]``. Two rules
+  are disabled with rationale in ``pyproject.toml``:
+  ``unnecessary-type-conversion`` (our coercions at SQL trust boundaries are
+  deliberate) and ``missing-override-decorator`` (``typing.override`` needs
+  Python 3.12; we support 3.11).
+
+### Fixed
+
+- **``makemigrations`` no longer reports auditrum as permanently
+  unmigrated.** Every shipped migration was pure ``RunSQL`` / ``RunPython``
+  — correct for the partitioned, trigger-driven schema, but it left
+  Django's *model state* empty, so the autodetector asked for
+  ``Create model AuditContext`` / ``Create model AuditLog`` on every run.
+  Downstream projects saw this on each ``makemigrations`` and on any CI
+  step gating on ``makemigrations --check``. The new
+  ``0005_model_state`` migration declares both models to the state graph
+  and emits **no DDL** — both are ``managed = False``, which
+  ``CreateModel`` skips at the database level — so applying it on an
+  existing deployment changes nothing. ``db_table`` is read from
+  ``audit_settings`` at import time, so projects on a custom
+  ``PGAUDIT_TABLE_NAME`` stay clean too instead of trading the
+  ``CreateModel`` noise for a permanent ``AlterModelTable``.
+- **``get_user_display`` raised ``AttributeError`` on a real audit row.**
+  The helper read ``log.user``, but ``AuditLog`` has a ``user_id`` column
+  and no ``user`` relation; it also called ``.get()`` on the nullable
+  ``meta`` field. Only the MagicMock-based unit tests hid it. Both lookups
+  are now guarded.
+
 ### Security
 
 - **Hash-chain payload now covers the attribution columns and binds the

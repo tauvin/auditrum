@@ -32,20 +32,14 @@ _IDENT_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 # into DDL. Loses coverage of short/upper/leading-underscore names;
 # those are covered by the identifier fuzz block below which tests the
 # regex boundary directly, without going through DDL rendering.
-safe_idents = st.from_regex(
-    r"^[a-z][a-z0-9_]{0,20}$", fullmatch=True
-).map(lambda s: f"t_{s}")
+safe_idents = st.from_regex(r"^[a-z][a-z0-9_]{0,20}$", fullmatch=True).map(lambda s: f"t_{s}")
 
 # Every string matching the validator's regex, any case, up to PG's
 # NAMEDATALEN ceiling minus a safety margin.
-regex_idents = st.from_regex(_IDENT_RE, fullmatch=True).filter(
-    lambda s: 1 <= len(s) <= 60
-)
+regex_idents = st.from_regex(_IDENT_RE, fullmatch=True).filter(lambda s: 1 <= len(s) <= 60)
 
 # Strings that should NOT match the validator regex.
-invalid_ident_strings = st.text(min_size=0, max_size=30).filter(
-    lambda s: not _IDENT_RE.match(s)
-)
+invalid_ident_strings = st.text(min_size=0, max_size=30).filter(lambda s: not _IDENT_RE.match(s))
 
 
 class TestValidateIdentifierFuzz:
@@ -121,9 +115,7 @@ class TestTrackSpecChecksumStability:
         assert a.install_sql == b.install_sql
 
     @given(table=safe_idents, audit_table=safe_idents)
-    def test_kwarg_order_is_irrelevant(
-        self, table: str, audit_table: str
-    ) -> None:
+    def test_kwarg_order_is_irrelevant(self, table: str, audit_table: str) -> None:
         a = TrackSpec(table=table, audit_table=audit_table).build()
         b = TrackSpec(audit_table=audit_table, table=table).build()
         assert a.checksum == b.checksum
@@ -146,9 +138,7 @@ class TestTrackSpecChecksumStability:
         assert ca != cb
 
     @given(fields=st.lists(safe_idents, min_size=2, max_size=5, unique=True))
-    def test_field_order_in_only_affects_checksum(
-        self, fields: list[str]
-    ) -> None:
+    def test_field_order_in_only_affects_checksum(self, fields: list[str]) -> None:
         # Intentional — FieldFilter.fields is a tuple, not a set.
         # Documented by this test so a future "let's sort fields for the
         # user" refactor trips on purpose rather than silently
@@ -157,12 +147,8 @@ class TestTrackSpecChecksumStability:
         desc = list(reversed(asc))
         if asc == desc:
             return
-        ca = TrackSpec(
-            table="t_a", fields=FieldFilter.only(*asc)
-        ).build().checksum
-        cb = TrackSpec(
-            table="t_a", fields=FieldFilter.only(*desc)
-        ).build().checksum
+        ca = TrackSpec(table="t_a", fields=FieldFilter.only(*asc)).build().checksum
+        cb = TrackSpec(table="t_a", fields=FieldFilter.only(*desc)).build().checksum
         assert ca != cb
 
 
@@ -174,30 +160,22 @@ class TestTriggerSqlRoundTrip:
 
     @given(table=safe_idents, audit_table=safe_idents)
     def test_basic_parses(self, table: str, audit_table: str) -> None:
-        pglast.parse_sql(
-            generate_trigger_sql(table, audit_table=audit_table)
-        )
+        pglast.parse_sql(generate_trigger_sql(table, audit_table=audit_table))
 
     @given(
         table=safe_idents,
         audit_table=safe_idents,
         track_only=st.lists(safe_idents, min_size=1, max_size=5, unique=True),
     )
-    def test_track_only_parses(
-        self, table: str, audit_table: str, track_only: list[str]
-    ) -> None:
+    def test_track_only_parses(self, table: str, audit_table: str, track_only: list[str]) -> None:
         pglast.parse_sql(
-            generate_trigger_sql(
-                table, audit_table=audit_table, track_only=track_only
-            )
+            generate_trigger_sql(table, audit_table=audit_table, track_only=track_only)
         )
 
     @given(
         table=safe_idents,
         audit_table=safe_idents,
-        exclude_fields=st.lists(
-            safe_idents, min_size=1, max_size=5, unique=True
-        ),
+        exclude_fields=st.lists(safe_idents, min_size=1, max_size=5, unique=True),
     )
     def test_exclude_parses(
         self,

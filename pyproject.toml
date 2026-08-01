@@ -24,6 +24,7 @@ classifiers = [
     "Framework :: Django",
     "Topic :: Database",
     "Topic :: Software Development :: Libraries :: Python Modules",
+    "Typing :: Typed",
 ]
 
 keywords = ["postgresql", "audit", "django", "database", "triggers", "history", "track changes"]
@@ -70,8 +71,9 @@ docs = [
     "mkdocstrings[python]>=0.24",
 ]
 typecheck = [
-    "ty==0.0.31",
+    "pyrefly==1.2.0",
     "django-stubs>=5.0,<6",
+    "types-python-dateutil>=2.9",
 ]
 
 [project.urls]
@@ -89,11 +91,14 @@ include = ["auditrum*"]
 exclude = ["benchmarks*", "tests*"]
 
 [tool.setuptools.package-data]
-auditrum = ["**/*.html", "**/*.txt", "**/*.sql"]
+# ``py.typed`` (PEP 561) tells downstream type checkers that the inline
+# annotations in this package are authoritative. It must ship in the wheel
+# or the marker has no effect for installed users.
+auditrum = ["py.typed", "**/*.html", "**/*.txt", "**/*.sql"]
 
 # ---------------------------------------------------------------------------
-# Tooling config. Consolidated here from the previous ruff.toml / ty.toml /
-# pytest.ini / .coveragerc at the 0.7 RC prep (single source of truth).
+# Tooling config. Consolidated here from the previous ruff.toml / pyrefly.toml
+# / pytest.ini / .coveragerc at the 0.7 RC prep (single source of truth).
 # ---------------------------------------------------------------------------
 
 [tool.ruff]
@@ -111,25 +116,37 @@ docstring-code-format = true
 indent-style = "space"
 skip-magic-trailing-comma = false
 
-[tool.ty.environment]
+[tool.pyrefly]
+# The whole shipped package is type checked — core, Django integration,
+# SQLAlchemy and observability alike. Nothing under ``auditrum/`` is
+# excluded, so the ``py.typed`` marker we ship is backed by a gate that
+# actually covers every module a user can import.
+project-includes = ["auditrum"]
 python-version = "3.11"
+# ``strict`` adds the annotation-completeness checks on top of the default
+# preset: an unannotated parameter, a bare ``list`` / ``dict`` type argument
+# or an untyped empty container is an error, not a silent ``Any``. That is
+# what makes the ``py.typed`` marker meaningful — a downstream project type
+# checking against auditrum gets real types, not ``Any`` bleeding out of our
+# public surface.
+preset = "strict"
 
-[tool.ty.src]
-# Scope per ROADMAP 0.4: core + Django integration only. SQLAlchemy and
-# observability are public-experimental and get polished in the 1.x line.
-include = ["auditrum"]
-exclude = [
-    "auditrum/integrations/sqlalchemy",
-    "auditrum/observability",
-]
+[tool.pyrefly.errors]
+# Auditrum interpolates identifiers and values into SQL. Several call sites
+# coerce a parameter right before it reaches ``sql.Literal`` / a query
+# parameter tuple (``sql.Literal(int(log_id))``, ``cur.execute(q, (table,
+# str(object_id)))``). Pyrefly is correct that the annotation already says
+# ``int`` / ``str`` — but an annotation is not a runtime guarantee, and these
+# coercions are deliberate defence in depth on a SQL trust boundary. Keeping
+# the rule off is cheaper and clearer than eight scattered suppressions.
+unnecessary-type-conversion = false
 
-[tool.ty.analysis]
-respect-type-ignore-comments = true
-
-[tool.ty.terminal]
-# Core + Django integration are clean as of the 0.4 typing gate; any new
-# warning blocks CI until triaged.
-error-on-warning = true
+# ``typing.override`` only exists from Python 3.12, and we support 3.11
+# (see the version policy in ROADMAP). Satisfying this rule would mean
+# taking a runtime dependency on ``typing_extensions`` for a decorator that
+# buys us nothing the type checker isn't already verifying. Revisit when
+# the supported floor moves to 3.12.
+missing-override-decorator = false
 
 [tool.pytest.ini_options]
 python_files = "test_*.py"

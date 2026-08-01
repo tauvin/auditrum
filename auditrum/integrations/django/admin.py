@@ -1,6 +1,11 @@
+from collections.abc import Iterable
+from typing import TYPE_CHECKING, Any
+
 from django.contrib import admin
+from django.http import HttpRequest, HttpResponse
 from django.urls import NoReverseMatch, reverse
 from django.utils.html import format_html
+from django.utils.safestring import SafeString
 
 from auditrum.integrations.django.models import AuditContext, AuditLog
 from auditrum.integrations.django.utils import model_for_table
@@ -10,8 +15,18 @@ __all__ = [
     "AuditLogAdmin",
 ]
 
+# django-stubs makes ``ModelAdmin`` generic in the administered model, but the
+# real class has no ``__class_getitem__`` — subscripting it at runtime raises
+# ``TypeError``. Bind the parameter for the checker only.
+if TYPE_CHECKING:
+    _ContextAdminBase = admin.ModelAdmin[AuditContext]
+    _LogAdminBase = admin.ModelAdmin[AuditLog]
+else:
+    _ContextAdminBase = admin.ModelAdmin
+    _LogAdminBase = admin.ModelAdmin
 
-def _admin_change_url(table_name: str, object_id) -> str | None:
+
+def _admin_change_url(table_name: str, object_id: object) -> str | None:
     """Return the admin ``change`` URL for ``(table_name, object_id)``,
     or ``None`` if the table doesn't map to a registered admin model or
     the URL pattern can't be reversed for that object id.
@@ -31,7 +46,7 @@ def _admin_change_url(table_name: str, object_id) -> str | None:
 
 
 @admin.register(AuditContext)
-class AuditContextAdmin(admin.ModelAdmin):
+class AuditContextAdmin(_ContextAdminBase):
     list_display = (
         "id",
         "created_at",
@@ -51,15 +66,15 @@ class AuditContextAdmin(admin.ModelAdmin):
     search_fields = ("id",)
 
     @admin.display(description="Events")
-    def event_count(self, obj):
+    def event_count(self, obj: AuditContext) -> int:
         return obj.events.count()
 
     @admin.display(description="Source")
-    def source(self, obj):
+    def source(self, obj: AuditContext) -> str:
         return (obj.metadata or {}).get("source") or "—"
 
     @admin.display(description="User")
-    def user_label(self, obj):
+    def user_label(self, obj: AuditContext) -> object:
         # ``username`` is the human-readable label the middleware stamps
         # when available; ``user_id`` is the typed integer — fall back
         # to whichever is present so the admin row always renders
@@ -68,11 +83,11 @@ class AuditContextAdmin(admin.ModelAdmin):
         return metadata.get("username") or metadata.get("user_id") or "—"
 
     @admin.display(description="Change Reason")
-    def change_reason(self, obj):
+    def change_reason(self, obj: AuditContext) -> str:
         return (obj.metadata or {}).get("change_reason") or "—"
 
     @admin.display(description="Events in this context")
-    def events_link(self, obj):
+    def events_link(self, obj: AuditContext) -> SafeString:
         # Render a link to the pre-filtered AuditLog changelist rather
         # than embedding an inline — bulk operations under a single
         # context can produce thousands of rows, which the inline would
@@ -91,7 +106,7 @@ class AuditContextAdmin(admin.ModelAdmin):
 
 
 @admin.register(AuditLog)
-class AuditLogAdmin(admin.ModelAdmin):
+class AuditLogAdmin(_LogAdminBase):
     list_display = (
         "changed_at",
         "operation",
@@ -133,7 +148,9 @@ class AuditLogAdmin(admin.ModelAdmin):
     # ASGI.
     resolve_linked_objects: bool = False
 
-    def changelist_view(self, request, extra_context=None):
+    def changelist_view(
+        self, request: HttpRequest, extra_context: dict[str, Any] | None = None
+    ) -> HttpResponse:
         response = super().changelist_view(request, extra_context)
         if not self.resolve_linked_objects:
             return response
@@ -148,11 +165,16 @@ class AuditLogAdmin(admin.ModelAdmin):
         return response
 
     @staticmethod
-    def _attach_linked_targets(rows) -> None:
+    def _attach_linked_targets(rows: Iterable[Any]) -> None:
         """Resolve every ``(table_name, object_id)`` tuple on the page
         in O(distinct table_names) SELECTs and stash the result on each
         row as ``_auditrum_linked``. ``linked_object`` then prefers the
         stashed instance over the cheap link.
+
+        ``rows`` is typed loosely because this method *adds* the
+        ``_auditrum_linked`` attribute to each :class:`AuditLog` row —
+        it is a render-time annotation owned by this admin, not a model
+        field, so it deliberately doesn't exist on the model's type.
 
         Mismatched PK types (e.g. an int ``object_id`` against a UUID
         column) raise from ``in_bulk`` — the per-table block is skipped
@@ -180,7 +202,7 @@ class AuditLogAdmin(admin.ModelAdmin):
             row._auditrum_linked = resolved.get((row.table_name, str(row.object_id)))
 
     @admin.display(description="Linked Object")
-    def linked_object(self, obj):
+    def linked_object(self, obj: AuditLog) -> str | SafeString:
         if not obj.object_id or not obj.table_name:
             return "-"
         # Tier 2: when ``resolve_linked_objects`` is enabled and

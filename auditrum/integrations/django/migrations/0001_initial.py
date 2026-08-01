@@ -1,3 +1,5 @@
+from typing import ClassVar
+
 from django.db import migrations
 
 from auditrum.integrations.django.settings import audit_settings
@@ -14,7 +16,7 @@ from auditrum.schema import (
 
 class Migration(migrations.Migration):
     initial = True
-    dependencies = []
+    dependencies: ClassVar[list[tuple[str, str]]] = []
 
     # Reading diff_gin_index/table_name at import time is intentional here:
     # 0001 runs once on a clean DB, and later changes to either are handled by

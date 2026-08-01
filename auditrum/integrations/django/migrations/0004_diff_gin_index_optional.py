@@ -37,9 +37,11 @@ autodetector has nothing to reconcile — ``makemigrations`` stays clean.
 """
 
 from django.db import migrations
+from django.db.backends.base.schema import BaseDatabaseSchemaEditor
+from django.db.migrations.state import StateApps
 
 
-def forward(apps, schema_editor):
+def forward(apps: StateApps, schema_editor: BaseDatabaseSchemaEditor) -> None:
     """Converge the diff GIN index to the configured state (read at apply time)."""
     from auditrum.integrations.django.settings import audit_settings
     from auditrum.tracking.spec import validate_identifier
@@ -53,7 +55,7 @@ def forward(apps, schema_editor):
     schema_editor.execute(sql)
 
 
-def reverse(apps, schema_editor):
+def reverse(apps: StateApps, schema_editor: BaseDatabaseSchemaEditor) -> None:
     """Undo :func:`forward` for the same configured state (read at apply time)."""
     from auditrum.integrations.django.settings import audit_settings
     from auditrum.tracking.spec import validate_identifier

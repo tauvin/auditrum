@@ -1,6 +1,6 @@
 from collections.abc import Callable
 from functools import lru_cache
-from typing import Literal, cast
+from typing import Any, Literal, cast
 
 import structlog
 import typer
@@ -257,7 +257,7 @@ def run_static_sql(
             # pipes every identifier through `validate_identifier` before
             # it reaches an f-string. pglast round-trip fuzzing planned
             # in ROADMAP 0.4 is the stronger long-term guard.
-            cur.execute(sql)  # ty: ignore[no-matching-overload]
+            cur.execute(sql)  # pyrefly: ignore[no-matching-overload]
             conn.commit()
             log.info("SQL successfully executed")
     except Exception as e:
@@ -266,7 +266,7 @@ def run_static_sql(
 
 def execute_or_print_sql(
     sql_fn: Callable[..., str],
-    sql_args: tuple,
+    sql_args: tuple[Any, ...],
     dry_run: bool,
     output: str | None = None,
     db_dsn: str | None = None,
@@ -285,7 +285,7 @@ def execute_or_print_sql(
             with conn.cursor() as cur:
                 # Same trust boundary as run_static_sql: `sql_fn` is one
                 # of auditrum's validated generators.
-                cur.execute(sql)  # ty: ignore[no-matching-overload]
+                cur.execute(sql)  # pyrefly: ignore[no-matching-overload]
             conn.commit()
             log.info("SQL successfully executed")
     except Exception as e:

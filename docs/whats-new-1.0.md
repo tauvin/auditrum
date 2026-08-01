@@ -61,7 +61,7 @@ escape hatch (`auditrum_refresh_schema`), and observability hooks
 
 ### API stabilization (0.3.2 / 0.4)
 The public/private boundary drawn explicitly: `__all__` locked on every
-module, a strict `ty` typing gate in CI, property-based tests, a coverage
+module, a strict `pyrefly` typing gate in CI, property-based tests, a coverage
 floor, remediation-oriented error messages, and the
 [API stability](api-stability.md) classification that 1.0's promise rests on.
 

@@ -14,9 +14,7 @@ from typing import Any
 __all__ = ["add_breadcrumb_for_context"]
 
 
-def add_breadcrumb_for_context(
-    metadata: dict[str, Any], *, category: str = "auditrum"
-) -> None:
+def add_breadcrumb_for_context(metadata: dict[str, Any], *, category: str = "auditrum") -> None:
     """Add a breadcrumb to the current Sentry scope.
 
     Silent no-op if ``sentry_sdk`` is not installed. The metadata is

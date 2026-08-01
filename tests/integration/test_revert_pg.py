@@ -30,9 +30,7 @@ class TestRevertRoundtrip:
             )
             log_id = cur.fetchone()[0]
 
-            sql = generate_revert_sql_from_log(
-                conn, "auditlog", "users", str(user_id), log_id
-            )
+            sql = generate_revert_sql_from_log(conn, "auditlog", "users", str(user_id), log_id)
             cur.execute(sql)
             cur.execute("SELECT email FROM users WHERE id = %s", (user_id,))
             assert cur.fetchone()[0] == "a@old.com"

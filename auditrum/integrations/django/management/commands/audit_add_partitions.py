@@ -1,6 +1,8 @@
+from typing import Any
+
 import psycopg
 from django.conf import settings
-from django.core.management.base import BaseCommand
+from django.core.management.base import BaseCommand, CommandParser
 
 from auditrum.schema import generate_auditlog_partitions_sql
 
@@ -8,7 +10,7 @@ from auditrum.schema import generate_auditlog_partitions_sql
 class Command(BaseCommand):
     help = "Create partitions for the auditlog table N months ahead"
 
-    def add_arguments(self, parser):
+    def add_arguments(self, parser: CommandParser) -> None:
         parser.add_argument(
             "--months",
             type=int,
@@ -16,7 +18,7 @@ class Command(BaseCommand):
             help="Number of months ahead to create partitions for (default: 1)",
         )
 
-    def handle(self, *args, **options):
+    def handle(self, *args: Any, **options: Any) -> None:
         months = options["months"]
         sql = generate_auditlog_partitions_sql(months_ahead=months)
         self.stdout.write(f"Executing SQL to create partitions for {months} month(s)...")
@@ -36,5 +38,5 @@ class Command(BaseCommand):
             # `sql` comes from generate_auditlog_partitions_sql, whose
             # table name is validated via validate_identifier. See
             # auditrum/schema.py:151 for the trust boundary.
-            cur.execute(sql)  # ty: ignore[no-matching-overload]
+            cur.execute(sql)  # pyrefly: ignore[no-matching-overload]
         self.stdout.write(self.style.SUCCESS("Partitions created successfully."))

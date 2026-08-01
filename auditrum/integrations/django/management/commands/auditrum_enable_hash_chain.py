@@ -17,7 +17,9 @@ is safe.
 
 from __future__ import annotations
 
-from django.core.management.base import BaseCommand
+from typing import Any
+
+from django.core.management.base import BaseCommand, CommandParser
 from django.db import connection
 
 from auditrum.hash_chain import generate_hash_chain_sql
@@ -33,14 +35,14 @@ class Command(BaseCommand):
         "(not a migration) because chaining serialises inserts."
     )
 
-    def add_arguments(self, parser):
+    def add_arguments(self, parser: CommandParser) -> None:
         parser.add_argument(
             "--dry-run",
             action="store_true",
             help="Print the SQL that would be executed and exit.",
         )
 
-    def handle(self, *args, **options):
+    def handle(self, *args: Any, **options: Any) -> None:
         table_name = audit_settings.table_name
         sql = generate_hash_chain_sql(table_name)
 

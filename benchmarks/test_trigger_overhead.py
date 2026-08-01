@@ -67,8 +67,7 @@ def test_insert_untracked(benchmark, bench_tables):
     def run():
         with conn.cursor() as cur:
             cur.execute(
-                "INSERT INTO bench_untracked (status, total, tenant_id) "
-                "VALUES ('new', 100.00, 1)"
+                "INSERT INTO bench_untracked (status, total, tenant_id) VALUES ('new', 100.00, 1)"
             )
 
     benchmark(run)
@@ -81,8 +80,7 @@ def test_insert_tracked_all_fields(benchmark, bench_tables):
     def run():
         with conn.cursor() as cur:
             cur.execute(
-                "INSERT INTO bench_tracked (status, total, tenant_id) "
-                "VALUES ('new', 100.00, 1)"
+                "INSERT INTO bench_tracked (status, total, tenant_id) VALUES ('new', 100.00, 1)"
             )
 
     benchmark(run)
@@ -109,15 +107,12 @@ def test_insert_tracked_only_two_fields(benchmark, fresh_auditlog):
             "notes text"
             ")"
         )
-        cur.execute(
-            generate_trigger_sql("bench_narrow", track_only=["status", "total"])
-        )
+        cur.execute(generate_trigger_sql("bench_narrow", track_only=["status", "total"]))
 
     def run():
         with conn.cursor() as cur:
             cur.execute(
-                "INSERT INTO bench_narrow (status, total, tenant_id) "
-                "VALUES ('new', 100.00, 1)"
+                "INSERT INTO bench_narrow (status, total, tenant_id) VALUES ('new', 100.00, 1)"
             )
 
     benchmark(run)
@@ -188,16 +183,13 @@ def test_update_tracked_with_log_condition_short_circuit(benchmark, fresh_auditl
             )
         )
         cur.execute(
-            "INSERT INTO bench_gated (status, is_logged) VALUES ('new', false) "
-            "RETURNING id"
+            "INSERT INTO bench_gated (status, is_logged) VALUES ('new', false) RETURNING id"
         )
         row_id = cur.fetchone()[0]
 
     def run():
         with conn.cursor() as cur:
-            cur.execute(
-                "UPDATE bench_gated SET status = 'paid' WHERE id = %s", (row_id,)
-            )
+            cur.execute("UPDATE bench_gated SET status = 'paid' WHERE id = %s", (row_id,))
 
     benchmark(run)
 

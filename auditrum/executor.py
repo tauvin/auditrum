@@ -15,12 +15,13 @@ Three executors ship out of the box:
   so the core module does not depend on Django.
 """
 
-from collections.abc import Iterator
+from collections.abc import Generator
 from contextlib import contextmanager
 from typing import Any, Protocol, runtime_checkable
 
 __all__ = [
     "ConnectionExecutor",
+    "ConnectionProtocol",
     "CursorProtocol",
     "NullExecutor",
     "PsycopgExecutor",
@@ -29,6 +30,23 @@ __all__ = [
 
 class CursorProtocol(Protocol):
     def execute(self, query: Any, params: Any = ...) -> Any: ...
+
+
+@runtime_checkable
+class ConnectionProtocol(Protocol):
+    """Anything that hands out a cursor context manager.
+
+    The query helpers (:mod:`auditrum.timetravel`, :mod:`auditrum.blame`,
+    :mod:`auditrum.revert`, :mod:`auditrum.retention`) work against both a
+    raw :mod:`psycopg` ``Connection`` and a Django ``DatabaseWrapper``.
+    Those two share no base class, so the parameter is typed structurally
+    on the one call the helpers can portably make: a no-argument
+    ``cursor()``. Anything beyond that (psycopg's server-side ``name=``
+    cursors, explicit ``transaction()`` blocks) is psycopg-only and is
+    reached through a locally widened reference at the call site.
+    """
+
+    def cursor(self) -> Any: ...
 
 
 @runtime_checkable
@@ -45,7 +63,7 @@ class _NullCursor:
     def __enter__(self) -> "_NullCursor":
         return self
 
-    def __exit__(self, exc_type, exc, tb) -> None:
+    def __exit__(self, exc_type: object, exc: object, tb: object) -> None:
         return None
 
 
@@ -75,6 +93,6 @@ class PsycopgExecutor:
         self._conn = conn
 
     @contextmanager
-    def cursor(self) -> Iterator[Any]:
+    def cursor(self) -> Generator[Any]:
         with self._conn.cursor() as cur:
             yield cur

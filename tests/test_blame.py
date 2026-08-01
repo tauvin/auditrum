@@ -99,9 +99,7 @@ class TestFormatBlameFieldFilter:
             new_value="a@x.com",
             diff=None,
         )
-        out = format_blame(
-            [e], fmt="text", field="email", table="users", object_id="42"
-        )
+        out = format_blame([e], fmt="text", field="email", table="users", object_id="42")
         assert "a@x.com" in out
         assert "→" in out
 
@@ -112,9 +110,7 @@ class TestFormatBlameFieldFilter:
             new_value="a2@x.com",
             diff={"email": "a2@x.com"},
         )
-        out = format_blame(
-            [e], fmt="text", field="email", table="users", object_id="42"
-        )
+        out = format_blame([e], fmt="text", field="email", table="users", object_id="42")
         assert "a@x.com" in out
         assert "a2@x.com" in out
         assert "→" in out
@@ -125,18 +121,14 @@ class TestFormatBlameFieldFilter:
             old_value="a@x.com",
             new_value=None,
         )
-        out = format_blame(
-            [e], fmt="text", field="email", table="users", object_id="42"
-        )
+        out = format_blame([e], fmt="text", field="email", table="users", object_id="42")
         assert "a@x.com" in out
         assert "∅" in out
 
     def test_truncates_long_values(self):
         long_val = "x" * 100
         e = _entry(operation="INSERT", old_value=None, new_value=long_val, diff=None)
-        out = format_blame(
-            [e], fmt="text", field="email", table="users", object_id="42"
-        )
+        out = format_blame([e], fmt="text", field="email", table="users", object_id="42")
         assert "..." in out
 
 

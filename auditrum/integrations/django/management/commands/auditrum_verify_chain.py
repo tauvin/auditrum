@@ -15,8 +15,9 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import Any
 
-from django.core.management.base import BaseCommand, CommandError
+from django.core.management.base import BaseCommand, CommandError, CommandParser
 from django.db import connection
 
 from auditrum.hash_chain import get_chain_tip, verify_chain
@@ -30,7 +31,7 @@ class Command(BaseCommand):
         "monitoring)."
     )
 
-    def add_arguments(self, parser):
+    def add_arguments(self, parser: CommandParser) -> None:
         parser.add_argument(
             "--expected-tip-json",
             help=(
@@ -44,7 +45,7 @@ class Command(BaseCommand):
             ),
         )
 
-    def _load_expected_tip(self, raw: str) -> dict:
+    def _load_expected_tip(self, raw: str) -> dict[str, Any]:
         path = Path(raw)
         if path.is_file():
             raw = path.read_text()
@@ -58,7 +59,7 @@ class Command(BaseCommand):
             raise CommandError("--expected-tip-json must decode to a JSON object.")
         return tip
 
-    def handle(self, *args, **options):
+    def handle(self, *args: Any, **options: Any) -> None:
         table_name = audit_settings.table_name
 
         expected_tip = None
