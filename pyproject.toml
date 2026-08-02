@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "auditrum"
-version = "0.5.1"
+version = "0.6.0"
 description = "Auditrum — a PostgreSQL audit system with rich contextual logging and Django integration"
 readme = "README.md"
 authors = [
@@ -159,7 +159,9 @@ testpaths = ["tests"]
 norecursedirs = ["*", "benchmarks", ".venv", "build", "dist"]
 
 [tool.coverage.run]
-# Coverage scope mirrors the ty typing gate: core + Django integration.
+# Coverage scope stays narrower than the pyrefly gate: the SQLAlchemy and
+# observability helpers are type checked but exercised only lightly, so
+# holding them to the same coverage floor would just game the number.
 source = ["auditrum"]
 branch = true
 omit = [

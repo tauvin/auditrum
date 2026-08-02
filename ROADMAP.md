@@ -249,7 +249,7 @@ measurements move to the pre-release (RC) validation pass.
 
 ---
 
-### 0.6 — Documentation & production guide
+### 0.6 — Documentation & production guide (shipped 2026-08-02)
 
 **Theme:** turn ``docs/`` from "files written during development" into
 a real production deployment manual that a new user can follow without

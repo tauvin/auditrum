@@ -8,6 +8,8 @@ the API stabilises.
 
 ## [Unreleased]
 
+## [0.6.0] — 2026-08-02
+
 ### Added
 
 - **The package ships ``py.typed`` (PEP 561).** Inline annotations are now
@@ -1228,7 +1230,8 @@ Initial public release. Adds the Django integration, the Typer-based
 CLI, and the first cut of trigger-based audit logging on partitioned
 PostgreSQL tables.
 
-[Unreleased]: https://github.com/tauvin/auditrum/compare/v0.3.1...HEAD
+[Unreleased]: https://github.com/tauvin/auditrum/compare/v0.6.0...HEAD
+[0.6.0]: https://github.com/tauvin/auditrum/compare/v0.5.1...v0.6.0
 [0.3.1]: https://github.com/tauvin/auditrum/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/tauvin/auditrum/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/tauvin/auditrum/releases/tag/v0.2.0

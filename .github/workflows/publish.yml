@@ -143,6 +143,20 @@ jobs:
           fi
           printf '%s\n' "$SQL_FILES"
 
+      # Same failure mode as the .sql check, quieter: without py.typed in
+      # the wheel the PEP 561 marker has no effect for installed users, so
+      # every annotation we ship silently degrades to Any downstream while
+      # the package still imports fine.
+      - name: Verify py.typed is bundled
+        run: |
+          set -euo pipefail
+          WHEEL=$(ls dist/*.whl)
+          if ! python -m zipfile -l "$WHEEL" | grep -q 'auditrum/py\.typed'; then
+            echo "::error::py.typed missing from built wheel"
+            exit 1
+          fi
+          echo "py.typed present in $WHEEL"
+
       # Trusted Publishing via OIDC — no ``secrets.PYPI`` token in the
       # repo, nothing to rotate, nothing to leak through a compromised
       # contributor. The identity is bound to this repo + this workflow
