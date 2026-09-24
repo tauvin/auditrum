@@ -244,12 +244,15 @@ binary. Run them as `python manage.py <command>`.
 
 ### `auditrum_makemigrations`
 
-Generate Django migration files for every `@track`-decorated model.
-Full guide in [`django.md`](django.md#migrations).
+Generate Django migration files for `@track`-decorated models whose
+trigger changed since the last migration (new, edited, removed, or
+re-rendered by an auditrum upgrade). Writes nothing when everything is
+up to date. Full guide in [`django.md`](django.md#migrations).
 
 ```bash
 python manage.py auditrum_makemigrations
 python manage.py auditrum_makemigrations --dry-run
+python manage.py auditrum_makemigrations --check   # CI: exit 1 if migrations are missing
 python manage.py auditrum_makemigrations --name release_v3
 ```
 
