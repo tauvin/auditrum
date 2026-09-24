@@ -373,6 +373,8 @@ auditrum/
 │   │   ├── middleware.py                  # AuditrumMiddleware, RequestIDMiddleware
 │   │   ├── tracking.py                    # @track decorator + per-process registry
 │   │   ├── operations.py                  # InstallTrigger/UninstallTrigger migration ops
+│   │   ├── autodetector.py                # diff @track registry vs trigger migrations
+│   │   ├── checks.py                      # auditrum.W001 "trigger migrations missing"
 │   │   ├── audit.py                       # Legacy register() facade
 │   │   ├── models.py                      # AuditLog, AuditContext, AuditLogManager
 │   │   ├── mixins.py                      # AuditedModelMixin, AuditHistoryMixin
@@ -404,6 +406,7 @@ tests/
 ├── test_django_runtime.py             # auditrum_context + inject wrapper
 ├── test_django_operations.py          # InstallTrigger/UninstallTrigger migration ops
 ├── test_django_tracking_decorator.py  # @track decorator + auditrum_makemigrations
+├── test_django_autodetector.py        # trigger change detection, --check, W001
 ├── test_django_models.py              # AuditLogManager / AuditLogQuerySet
 ├── test_mixins.py                     # AuditedModelMixin helpers
 ├── test_sqlalchemy_integration.py     # SQLAlchemyExecutor + track_table

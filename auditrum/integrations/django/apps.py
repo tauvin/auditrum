@@ -43,8 +43,11 @@ class PgAuditIntegrationConfig(AppConfig):
         for conn in connections.all():
             _ensure_wrapper_registered(conn)
 
+        # Registers the auditrum.W001 "trigger migrations out of date" check.
+        from auditrum.integrations.django import checks  # noqa: F401
+
         # Auto-discover per-app audit.py modules so their register() calls
-        # attach pgtrigger Triggers to the target models before migrations run.
+        # populate the @track registry before migrations run.
         for app_config in apps.get_app_configs():
             try:
                 import_module(f"{app_config.name}.audit")

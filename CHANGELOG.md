@@ -8,6 +8,32 @@ the API stabilises.
 
 ## [Unreleased]
 
+### Fixed
+
+- **Editing a ``@track`` spec now produces a migration that updates the
+  trigger.** Django's ``makemigrations`` cannot see audit triggers, so
+  changing ``fields`` / ``exclude`` / ``extra_meta`` / ``log_condition``
+  left the old trigger body in the database with no hint that anything was
+  missing. ``auditrum_makemigrations`` now diffs the registry against the
+  trigger state replayed from existing migrations and writes only what
+  changed: ``InstallTrigger`` for new or edited specs, ``UninstallTrigger``
+  for specs that were removed or renamed (previously a renamed trigger was
+  left installed next to the new one, double-logging every write). Running
+  it with nothing to do no longer writes a duplicate snapshot migration.
+
+### Added
+
+- ``InstallTrigger(checksum=...)`` records the checksum of the trigger body
+  a migration was generated against, so ``auditrum_makemigrations`` also
+  picks up trigger template changes shipped by an auditrum upgrade.
+  Migrations generated before this release carry no checksum, so the first
+  run after upgrading writes one refresh migration per app with tracked
+  models.
+- ``auditrum_makemigrations --check`` exits non-zero when trigger
+  migrations are missing, for CI.
+- System check ``auditrum.W001`` warns on ``migrate`` / ``runserver`` /
+  ``check`` when a spec has changes not reflected in migrations.
+
 ## [0.6.0] — 2026-08-02
 
 ### Added

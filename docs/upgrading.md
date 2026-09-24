@@ -21,8 +21,8 @@ pip install -U "auditrum[django]"
 # 1. Core schema migrations (drop content_type, refresh helpers, GIN opt-in)
 python manage.py migrate auditrum_django
 
-# 2. Regenerate per-app trigger migrations if a trigger body changed,
-#    then apply them
+# 2. Generate per-app trigger migrations for trigger bodies the upgrade
+#    changed (no-op if none did), then apply them
 python manage.py auditrum_makemigrations
 python manage.py migrate
 

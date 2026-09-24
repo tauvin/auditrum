@@ -147,6 +147,15 @@ class TestInstallTriggerDeconstruct:
         assert "fields_kind" not in kwargs
         assert "fields" not in kwargs
         assert "extra_meta_fields" not in kwargs
+        assert "checksum" not in kwargs
+
+    def test_checksum_roundtrips_without_affecting_spec(self):
+        op = InstallTrigger(table="users", checksum="abc123")
+        _, _, kwargs = op.deconstruct()
+        assert kwargs["checksum"] == "abc123"
+        rebuilt = InstallTrigger(**kwargs)
+        assert rebuilt.checksum == "abc123"
+        assert rebuilt.spec == InstallTrigger(table="users").spec
 
 
 class TestInstallTriggerApply:

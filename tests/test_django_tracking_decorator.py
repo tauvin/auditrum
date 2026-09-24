@@ -134,7 +134,7 @@ class TestAuditrumMakemigrationsCommand:
     def test_dry_run_no_specs_registered(self):
         out = StringIO()
         call_command("auditrum_makemigrations", "--dry-run", stdout=out)
-        assert "No @track-decorated models" in out.getvalue()
+        assert "No audit trigger changes detected" in out.getvalue()
 
     def test_dependencies_include_auditrum_initial(self):
         from django.contrib.auth.models import User

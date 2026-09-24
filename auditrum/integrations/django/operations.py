@@ -88,6 +88,13 @@ class InstallTrigger(Operation):
 
     Stored inline in the generated migration file so ``migrate`` has
     everything it needs without importing the project's model registry.
+
+    ``checksum`` is informational: the checksum of the trigger body the
+    migration was generated against. ``database_forwards`` always renders
+    the body from the *installed* auditrum version, so the value never
+    changes what gets applied — ``auditrum_makemigrations`` compares it
+    with the current checksum to notice that an auditrum upgrade changed
+    the trigger template and a refresh migration is due.
     """
 
     reversible = True
@@ -104,6 +111,7 @@ class InstallTrigger(Operation):
         extra_meta_fields: list[str] | None = None,
         log_condition: str | None = None,
         trigger_name: str | None = None,
+        checksum: str | None = None,
     ) -> None:
         self.spec = _kwargs_to_spec(
             table=table,
@@ -114,9 +122,12 @@ class InstallTrigger(Operation):
             log_condition=log_condition,
             trigger_name=trigger_name,
         )
+        self.checksum = checksum
 
     def deconstruct(self) -> tuple[str, list[Any], dict[str, Any]]:
         kwargs = _spec_to_deconstruct_kwargs(self.spec)
+        if self.checksum is not None:
+            kwargs["checksum"] = self.checksum
         return (self.__class__.__name__, [], kwargs)
 
     def state_forwards(self, app_label: str, state: ProjectState) -> None:

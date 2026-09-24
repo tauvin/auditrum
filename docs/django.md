@@ -104,8 +104,23 @@ python manage.py auditrum_makemigrations --dry-run
 python manage.py migrate
 ```
 
-The command walks the `@track` registry, groups specs by the tracked
-model's `app_label`, and writes one migration file into `<app>/migrations/`.
+The command walks the `@track` registry, replays the `InstallTrigger` /
+`UninstallTrigger` operations already in your migrations, and writes a
+migration into `<app>/migrations/` only for what differs:
+
+| Change                                                        | Operation                          |
+|---------------------------------------------------------------|------------------------------------|
+| new `@track`                                                  | `InstallTrigger`                   |
+| edited `fields` / `exclude` / `extra_meta` / `log_condition`  | `InstallTrigger` (replaces body)   |
+| trigger template changed by an auditrum upgrade               | `InstallTrigger` (via `checksum`)  |
+| `@track` removed, model deleted                               | `UninstallTrigger`                 |
+| `trigger_name` changed                                        | `UninstallTrigger` + `InstallTrigger` |
+
+With no changes it prints `No audit trigger changes detected.` and writes
+nothing. Plain `makemigrations` cannot see trigger specs, so auditrum
+registers the system check `auditrum.W001`: `migrate`, `runserver` and
+`check` warn when a spec has changes that no migration covers. In CI, gate
+on `python manage.py auditrum_makemigrations --check`.
 Dependencies are filled in automatically: every generated migration
 depends on `auditrum_django.0001_initial` and the latest existing
 migration in the target app.
@@ -131,6 +146,7 @@ class Migration(migrations.Migration):
             table="myapp_order",
             fields_kind="only",
             fields=["status", "total"],
+            checksum="3f1c…",  # body checksum, used only for change detection
         ),
     ]
 ```
@@ -147,9 +163,13 @@ all work.
 4. Apply with `migrate`.
 
 `TriggerManager.install(force=True)` is what runs inside
-`database_forwards`, so re-applying a migration updates the trigger in
-place via drift detection. You don't need to manually drop the old
-trigger.
+`database_forwards`, so an update migration replaces the trigger in
+place. You don't need to manually drop the old trigger.
+
+Rolling back an update migration runs `InstallTrigger.database_backwards`,
+which drops the trigger rather than restoring the previous spec. Roll back
+past the migration that first installed it (or migrate forward again) to
+get a working trigger back.
 
 ## Middleware
 
