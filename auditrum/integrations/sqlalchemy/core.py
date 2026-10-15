@@ -16,6 +16,7 @@ from auditrum.schema import (
     generate_jsonb_diff_function_sql,
 )
 from auditrum.tracking import FieldFilter, SyncReport, TrackSpec, TriggerManager
+from auditrum.tracking.spec import StorageMode
 
 __all__ = [
     "SQLAlchemyExecutor",
@@ -143,6 +144,7 @@ def track_table(
     log_condition: str | None = None,
     audit_table: str = "auditlog",
     trigger_name: str | None = None,
+    storage: StorageMode = "full",
 ) -> TrackSpec:
     """Register an audit trigger for a SQLAlchemy ``Table``.
 
@@ -156,6 +158,7 @@ def track_table(
         extra_meta_fields=tuple(extra_meta or ()),
         log_condition=log_condition,
         trigger_name=trigger_name,
+        storage=storage,
     )
     _registry[table.name] = spec
     return spec

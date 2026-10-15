@@ -41,6 +41,10 @@ def _make_table(name="users", *, cols=("id", "name", "email")):
 
 
 class TestTrackTable:
+    def test_storage_mode(self):
+        spec = track_table(_make_table(), storage="diff")
+        assert spec.storage == "diff"
+
     def test_registers_spec_with_table_name(self):
         t = _make_table()
         spec = track_table(t, fields=["email"])

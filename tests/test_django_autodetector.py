@@ -115,6 +115,14 @@ class TestMigratedTriggerState:
 
 
 class TestDetectChanges:
+    def test_storage_switch_is_update(self):
+        track(storage="diff")(User)
+        loader = _FakeLoader([_install(table="auth_user")])
+        [change] = detect_changes(loader)["auth"]
+        assert change.kind is ChangeKind.UPDATE
+        assert change.reason == "spec changed"
+        assert change.spec.storage == "diff"
+
     def test_new_spec_is_install(self):
         track(exclude=["password"])(User)
         changes = detect_changes(_FakeLoader())

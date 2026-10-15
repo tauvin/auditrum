@@ -19,6 +19,7 @@ from typing import TYPE_CHECKING, Any
 from django.db.migrations.operations.base import Operation
 
 from auditrum.tracking import FieldFilter, TrackSpec, TriggerManager
+from auditrum.tracking.spec import StorageMode
 
 if TYPE_CHECKING:
     from django.db.backends.base.schema import BaseDatabaseSchemaEditor
@@ -43,6 +44,8 @@ def _spec_to_deconstruct_kwargs(spec: TrackSpec) -> dict[str, Any]:
         kwargs["log_condition"] = spec.log_condition
     if spec.trigger_name is not None:
         kwargs["trigger_name"] = spec.trigger_name
+    if spec.storage != "full":
+        kwargs["storage"] = spec.storage
     return kwargs
 
 
@@ -55,6 +58,7 @@ def _kwargs_to_spec(
     extra_meta_fields: list[str] | None = None,
     log_condition: str | None = None,
     trigger_name: str | None = None,
+    storage: StorageMode = "full",
 ) -> TrackSpec:
     if fields_kind == "only":
         field_filter = FieldFilter.only(*(fields or ()))
@@ -69,6 +73,7 @@ def _kwargs_to_spec(
         extra_meta_fields=tuple(extra_meta_fields or ()),
         log_condition=log_condition,
         trigger_name=trigger_name,
+        storage=storage,
     )
 
 
@@ -111,6 +116,7 @@ class InstallTrigger(Operation):
         extra_meta_fields: list[str] | None = None,
         log_condition: str | None = None,
         trigger_name: str | None = None,
+        storage: StorageMode = "full",
         checksum: str | None = None,
     ) -> None:
         self.spec = _kwargs_to_spec(
@@ -121,6 +127,7 @@ class InstallTrigger(Operation):
             extra_meta_fields=extra_meta_fields,
             log_condition=log_condition,
             trigger_name=trigger_name,
+            storage=storage,
         )
         self.checksum = checksum
 
@@ -181,6 +188,7 @@ class UninstallTrigger(Operation):
         extra_meta_fields: list[str] | None = None,
         log_condition: str | None = None,
         trigger_name: str | None = None,
+        storage: StorageMode = "full",
     ) -> None:
         self.spec = _kwargs_to_spec(
             table=table,
@@ -190,6 +198,7 @@ class UninstallTrigger(Operation):
             extra_meta_fields=extra_meta_fields,
             log_condition=log_condition,
             trigger_name=trigger_name,
+            storage=storage,
         )
 
     def deconstruct(self) -> tuple[str, list[Any], dict[str, Any]]:

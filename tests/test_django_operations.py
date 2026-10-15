@@ -107,6 +107,18 @@ class _FakeSchemaEditor:
 
 
 class TestInstallTriggerDeconstruct:
+    def test_roundtrip_with_storage(self):
+        op = InstallTrigger(table="users", storage="diff")
+        _, _, kwargs = op.deconstruct()
+        assert kwargs["storage"] == "diff"
+        rebuilt = InstallTrigger(**kwargs)
+        assert rebuilt.spec == op.spec
+        assert rebuilt.spec.storage == "diff"
+
+    def test_full_storage_omitted_from_deconstruct(self):
+        _, _, kwargs = InstallTrigger(table="users").deconstruct()
+        assert "storage" not in kwargs
+
     def test_roundtrip_minimal(self):
         op = InstallTrigger(table="users")
         name, args, kwargs = op.deconstruct()
