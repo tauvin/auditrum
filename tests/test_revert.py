@@ -13,6 +13,12 @@ class TestGenerateRevertSql:
         assert "'42'" in sql
         assert "WHERE id = 7" in sql
 
+    def test_values_fall_back_to_diff_old(self):
+        sql = generate_revert_sql("auditlog", "users", "42", 7, ["name"])
+        assert "audit_entry.old_data IS NOT NULL" in sql
+        assert "audit_entry.diff->'name'->>'old'" in sql
+        assert "SELECT old_data, diff FROM" in sql
+
     def test_record_id_is_quoted_and_escaped(self):
         # record_id with a quote must be safely escaped
         sql = generate_revert_sql("auditlog", "users", "abc' OR '1'='1", 1, ["name"])
