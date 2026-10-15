@@ -54,10 +54,20 @@ class DiffChainMismatch:
 
 
 # Built with psycopg.sql: {audit} is the audit table identifier, every value
-# is a bound parameter. "%%s" is a literal "%s" for format().
+# is a bound parameter. "%%s" is a literal "%s" for format(), "{{}}" a literal "{}".
+# Values compare as jsonb, except timestamptz: to_jsonb renders it in the
+# session TimeZone, so one instant written or read in different zones would
+# differ as text. Dropped columns are not in cols and compare as jsonb.
 _VERIFY_SQL = """
 WITH spec AS (
     SELECT _audit_tracked_spec(%(table)s) AS s
+),
+cols AS (
+    SELECT a.attname::text AS key, format_type(a.atttypid, a.atttypmod) AS col_type
+    FROM pg_attribute a
+    WHERE a.attrelid = quote_ident(%(table)s)::regclass
+      AND a.attnum > 0
+      AND NOT a.attisdropped
 ),
 scope AS (
     SELECT DISTINCT a.object_id
@@ -83,9 +93,11 @@ kv AS (
            d.value -> 'new' AS new_v,
            LAG(d.value -> 'new') OVER w AS prev_new,
            LAG(e.id) OVER w AS prev_id,
-           row_number() OVER (PARTITION BY e.object_id, d.key ORDER BY e.id DESC) AS rn_desc
+           row_number() OVER (PARTITION BY e.object_id, d.key ORDER BY e.id DESC) AS rn_desc,
+           c.col_type
     FROM ev e
     CROSS JOIN LATERAL jsonb_each(e.diff) AS d(key, value)
+    LEFT JOIN cols c ON c.key = d.key
     WHERE jsonb_typeof(d.value) = 'object'
     WINDOW w AS (PARTITION BY e.object_id, d.key ORDER BY e.id)
 ),
@@ -96,7 +108,11 @@ mismatches AS (
            format('old value of %%s differs from event %%s', k.key, k.prev_id) AS detail,
            k.changed_at
     FROM kv k
-    WHERE k.prev_id IS NOT NULL AND k.old_v IS DISTINCT FROM k.prev_new
+    WHERE k.prev_id IS NOT NULL
+      AND CASE WHEN k.col_type = 'timestamp with time zone'
+                    AND jsonb_typeof(k.old_v) = 'string' AND jsonb_typeof(k.prev_new) = 'string'
+               THEN (k.old_v #>> '{{}}')::timestamptz IS DISTINCT FROM (k.prev_new #>> '{{}}')::timestamptz
+               ELSE k.old_v IS DISTINCT FROM k.prev_new END
     UNION ALL
     -- lifecycle inside the history
     SELECT e.object_id, e.id, 'lifecycle', NULL, NULL, NULL,
@@ -123,7 +139,10 @@ mismatches AS (
            NULL
     FROM kv k JOIN live l ON l.object_id = k.object_id
     WHERE k.rn_desc = 1 AND l.row_data ? k.key
-      AND k.new_v IS DISTINCT FROM l.row_data -> k.key
+      AND CASE WHEN k.col_type = 'timestamp with time zone'
+                    AND jsonb_typeof(k.new_v) = 'string' AND jsonb_typeof(l.row_data -> k.key) = 'string'
+               THEN (k.new_v #>> '{{}}')::timestamptz IS DISTINCT FROM (l.row_data ->> k.key)::timestamptz
+               ELSE k.new_v IS DISTINCT FROM l.row_data -> k.key END
 )
 SELECT DISTINCT ON (m.object_id)
        m.object_id, m.audit_id, m.kind, m.column_name, m.expected::text, m.actual::text, m.detail

@@ -3,6 +3,7 @@
 import random
 
 import pytest
+from psycopg import sql
 
 from auditrum.diff_chain import list_registered_tables, verify_diff_chain
 from auditrum.executor import PsycopgExecutor
@@ -223,3 +224,29 @@ def test_random_history_is_clean_until_one_bypass(items, seed_value):
     assert str(victim) in {
         f.object_id for f in verify_diff_chain(items, table="vc_items", full=True)
     }
+
+
+def set_timezone(conn, zone):
+    with conn.cursor() as cur:
+        cur.execute(sql.SQL("SET TimeZone = {}").format(sql.Literal(zone)))
+
+
+def test_timestamptz_written_and_checked_in_different_zones_is_clean(items):
+    with items.cursor() as cur:
+        cur.execute("ALTER TABLE vc_items ADD COLUMN at timestamptz")
+    tracked(items)
+    with items.cursor() as cur:
+        cur.execute("SHOW TimeZone")
+        original = cur.fetchone()[0]
+    try:
+        set_timezone(items, "UTC")
+        with items.cursor() as cur:
+            cur.execute("INSERT INTO vc_items VALUES (1, 'a', 's', 0, '2026-10-01 12:00+00')")
+            cur.execute("UPDATE vc_items SET at = '2026-10-02 12:00+00' WHERE id = 1")
+        set_timezone(items, "Asia/Tokyo")
+        with items.cursor() as cur:
+            cur.execute("UPDATE vc_items SET at = '2026-10-03 12:00+00' WHERE id = 1")
+        set_timezone(items, "Europe/Berlin")
+        assert verify_diff_chain(items, table="vc_items", full=True) == []
+    finally:
+        set_timezone(items, original)
