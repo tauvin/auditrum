@@ -499,8 +499,10 @@ finds anything, so it works as a cron / monitoring alarm:
 
 Options: `--table` (repeatable), `--since` (default `'1 day'`), `--full`
 (ignores `--since`), `--object-id`, `--json`, `--limit`. Without `--table`
-every registered table is checked; with no registered tables it reports OK
-because nothing was checked. See [Diff chain check](diff-chain.md).
+every registered table is checked; with no registered tables it raises
+`CommandError` because nothing was checked. A table that cannot be
+checked is reported and skipped, and the command raises `CommandError`
+naming it after checking the others. See [Diff chain check](diff-chain.md).
 
 ## Tips and gotchas
 

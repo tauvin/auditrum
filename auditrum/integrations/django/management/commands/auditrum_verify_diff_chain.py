@@ -44,28 +44,33 @@ class Command(BaseCommand):
             raise CommandError(str(exc)) from exc
 
         tables = options["table"] or list_registered_tables(connection, audit_table)
-        findings = []
-        for table in tables:
-            findings.extend(
-                verify_diff_chain(
-                    connection,
-                    table=table,
-                    since=since,
-                    object_id=options["object_id"],
-                    full=full,
-                    audit_table=audit_table,
-                    limit=options["limit"],
-                )
+        if not tables:
+            raise CommandError(
+                f"no tracked tables registered for audit table {audit_table} — nothing checked"
             )
+        findings = []
+        failed = []
+        for table in tables:
+            try:
+                findings.extend(
+                    verify_diff_chain(
+                        connection,
+                        table=table,
+                        since=since,
+                        object_id=options["object_id"],
+                        full=full,
+                        audit_table=audit_table,
+                        limit=options["limit"],
+                    )
+                )
+            except Exception as exc:
+                self.stderr.write(self.style.ERROR(f"{table}: {exc}"))
+                failed.append(table)
         if options["limit"] is not None:
             findings = findings[: options["limit"]]
 
         if options["json"]:
             self.stdout.write(json.dumps([dataclasses.asdict(f) for f in findings], default=str))
-        if not findings:
-            if not options["json"]:
-                self.stdout.write(self.style.SUCCESS("diff chain OK"))
-            return
         for f in findings:
             column = f" {f.column}" if f.column else ""
             self.stderr.write(
@@ -73,4 +78,9 @@ class Command(BaseCommand):
                     f"{f.table}:{f.object_id} event {f.audit_id} {f.kind}{column}: {f.detail}"
                 )
             )
-        raise CommandError(f"diff chain: {len(findings)} finding(s)")
+        if failed:
+            raise CommandError(f"diff chain: could not check table(s): {', '.join(failed)}")
+        if findings:
+            raise CommandError(f"diff chain: {len(findings)} finding(s)")
+        if not options["json"]:
+            self.stdout.write(self.style.SUCCESS("diff chain OK"))

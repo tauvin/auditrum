@@ -1,5 +1,6 @@
 import dataclasses
 import json
+import sys
 from collections.abc import Callable
 from functools import lru_cache
 from typing import Annotated, Any, Literal, cast
@@ -410,25 +411,38 @@ def verify_diff_chain_cmd(
         log.error("No database DSN provided")
         raise typer.Exit(2)
     resolved = resolve_audit_table(audit_table)
+    failed: list[str] = []
     try:
         since_at = None if full else parse_since(since)
         findings = []
         with connect(dsn=db_dsn) as conn:
-            for name in table or list_registered_tables(conn, resolved):
-                findings.extend(
-                    verify_diff_chain(
-                        conn,
-                        table=name,
-                        since=since_at,
-                        object_id=object_id,
-                        full=full,
-                        audit_table=resolved,
-                        limit=limit,
+            tables = table or list_registered_tables(conn, resolved)
+            for name in tables:
+                try:
+                    findings.extend(
+                        verify_diff_chain(
+                            conn,
+                            table=name,
+                            since=since_at,
+                            object_id=object_id,
+                            full=full,
+                            audit_table=resolved,
+                            limit=limit,
+                        )
                     )
-                )
+                except Exception as e:
+                    log.error("Failed to verify the diff chain", table=name, error=str(e))
+                    conn.rollback()
+                    failed.append(name)
     except Exception as e:
         log.error("Failed to verify the diff chain", error=str(e))
         raise typer.Exit(2) from e
+    if not tables:
+        print(
+            f"no tracked tables registered for audit table {resolved} — nothing checked",
+            file=sys.stderr,
+        )
+        raise typer.Exit(2)
     if limit is not None:
         findings = findings[:limit]
 
@@ -441,8 +455,11 @@ def verify_diff_chain_cmd(
                 f"[red]{f.table}:{f.object_id} event {f.audit_id} {f.kind}{column}: {f.detail}[/red]"
             )
         rich_print(f"[red]{len(findings)} finding(s)[/red]")
-    else:
+    elif not failed:
         rich_print("[green]diff chain OK[/green]")
+    if failed:
+        print(f"diff chain: could not check table(s): {', '.join(failed)}", file=sys.stderr)
+        raise typer.Exit(2)
     raise typer.Exit(1 if findings else 0)
 
 

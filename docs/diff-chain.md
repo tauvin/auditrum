@@ -86,7 +86,9 @@ With Django:
 
 Without `--table` every table registered for the audit table is checked;
 `--object-id` then applies to every one of them. If no table is
-registered, the commands report OK because nothing was checked.
+registered, the commands fail (exit 2, or `CommandError` in Django) with
+"no tracked tables registered for audit table … — nothing checked",
+so a misconfigured audit table does not pass as clean.
 
 ## Python API
 
@@ -125,8 +127,11 @@ Each `DiffChainMismatch` has:
 
 The CLI prints one line per finding (`--json` prints an array of these
 fields) and exits 0 when clean, 1 with findings, 2 on error. `--limit`
-caps the total across tables. The Django command raises `CommandError`
-when anything is found. Details: [CLI reference](cli.md#verify-diff-chain),
+caps the total across tables. A table that cannot be checked (for
+example, it has no `id` column) is reported and skipped; the other
+tables are still checked and their findings printed, and the run exits
+2 naming the failed tables. The Django command does the same and raises
+`CommandError` when anything is found or a table failed. Details: [CLI reference](cli.md#verify-diff-chain),
 [Django integration](django.md#diff-chain-check).
 
 ## What to do with a finding
@@ -153,6 +158,8 @@ write of the affected columns.
 - Tables tracked with a `log_condition` cannot be verified: events the
   condition skips are gaps by design. `verify_diff_chain` raises
   `ValueError` for them, and runs without `--table` leave them out.
+- The tracked table needs a primary key column named `id`, the same
+  assumption as time travel: the live row is looked up by it.
 - Rows created before tracking, with no events at all, are not findings.
 - Pre-0.4 rows whose `diff` holds only the new values are used as the
   new value of each column they list. The 0.3 trigger stripped changes

@@ -103,3 +103,31 @@ class TestAuditrumVerifyDiffChain:
         ):
             call_command("auditrum_verify_diff_chain", "--table", "a", "--json", stdout=out)
         assert '"kind": "live"' in out.getvalue()
+
+    def test_failing_table_does_not_stop_the_others(self):
+        def verify(conn, *, table, **kwargs):
+            if table == "broken":
+                raise RuntimeError("column t.id does not exist")
+            return [FINDING]
+
+        err = StringIO()
+        with (
+            patch(f"{MODULE}.list_registered_tables", return_value=["broken", "items"]),
+            patch(f"{MODULE}.verify_diff_chain", side_effect=verify) as mock,
+            pytest.raises(CommandError, match="broken"),
+        ):
+            call_command("auditrum_verify_diff_chain", stderr=err)
+        assert [c.kwargs["table"] for c in mock.call_args_list] == ["broken", "items"]
+        assert "live value of name differs from event 7" in err.getvalue()
+
+    def test_empty_registry_raises(self):
+        with (
+            patch(f"{MODULE}.list_registered_tables", return_value=[]),
+            patch(f"{MODULE}.verify_diff_chain") as verify,
+            pytest.raises(
+                CommandError,
+                match="no tracked tables registered for audit table auditlog — nothing checked",
+            ),
+        ):
+            call_command("auditrum_verify_diff_chain")
+        verify.assert_not_called()

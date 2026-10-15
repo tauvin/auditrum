@@ -239,8 +239,9 @@ auditrum verify-diff-chain --table orders --object-id 42 --json
 | `--audit-table`, `--db-*` | As for the other commands. |
 
 Prints one finding per object (the first by event id). Exit 0 when
-clean, 1 with findings, 2 on error. With no registered tables it reports
-OK because nothing was checked.
+clean, 1 with findings, 2 on error. With no registered tables it exits
+2 because nothing was checked. A table that cannot be checked is
+reported and skipped; the others are still checked, and the run exits 2.
 
 ---
 

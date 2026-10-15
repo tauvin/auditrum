@@ -53,13 +53,18 @@ class TestVerifyDiffChainCommand:
     def setup_method(self):
         self.runner = CliRunner()
 
-    def _invoke(self, args, findings=(), tables=("items",)):
+    def _invoke(self, args, findings=(), tables=("items",), side_effect=None):
         with (
             patch("auditrum.cli.connect") as connect,
             patch("auditrum.cli.list_registered_tables", return_value=list(tables)) as listed,
-            patch("auditrum.cli.verify_diff_chain", return_value=list(findings)) as verify,
+            patch(
+                "auditrum.cli.verify_diff_chain",
+                return_value=list(findings),
+                side_effect=side_effect,
+            ) as verify,
         ):
-            connect.return_value.__enter__.return_value = MagicMock()
+            self.conn = MagicMock()
+            connect.return_value.__enter__.return_value = self.conn
             result = self.runner.invoke(
                 app, ["verify-diff-chain", "--db-dsn", "postgresql://x", *args]
             )
@@ -107,6 +112,28 @@ class TestVerifyDiffChainCommand:
         ):
             result = self.runner.invoke(app, ["verify-diff-chain", "--db-dsn", "postgresql://x"])
         assert result.exit_code == 2
+
+    def test_failing_table_does_not_stop_the_others(self):
+        def verify(conn, *, table, **kwargs):
+            if table == "broken":
+                raise RuntimeError("column t.id does not exist")
+            return [FINDING]
+
+        result, _, mock = self._invoke([], tables=("broken", "items"), side_effect=verify)
+        assert result.exit_code == 2
+        assert [c.kwargs["table"] for c in mock.call_args_list] == ["broken", "items"]
+        assert "live value of name differs from event 7" in result.output
+        assert "broken" in result.output
+        self.conn.rollback.assert_called_once()
+
+    def test_empty_registry_exits_two(self):
+        result, _, verify = self._invoke([], tables=())
+        assert result.exit_code == 2
+        assert (
+            "no tracked tables registered for audit table auditlog — nothing checked"
+            in result.output
+        )
+        verify.assert_not_called()
 
     def test_bad_since_exits_two(self):
         result, _, _ = self._invoke(["--since", "whenever"])
