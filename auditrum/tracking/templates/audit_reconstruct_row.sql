@@ -31,7 +31,7 @@ BEGIN
         END IF;
         v_spec := _audit_tracked_spec(p_table);
         IF v_spec IS NULL THEN
-            RAISE EXCEPTION 'auditrum: table % has diff-only audit rows but no entry in {tracking_table}', p_table;
+            RAISE EXCEPTION 'auditrum: table % has diff-only audit rows but no readable entry in {tracking_table} (missing row or no SELECT privilege)', p_table;
         END IF;
         -- Undoing the suffix restores, per column, the "old" of the
         -- earliest suffix event that touched it.
@@ -66,7 +66,7 @@ BEGIN
         -- The latest event is diff-only, so the live row is the current state
         -- whatever mode the table is in now.
         IF v_spec IS NULL THEN
-            RAISE EXCEPTION 'auditrum: table % has diff-only audit rows but no entry in {tracking_table}', p_table;
+            RAISE EXCEPTION 'auditrum: table % has diff-only audit rows but no readable entry in {tracking_table} (missing row or no SELECT privilege)', p_table;
         END IF;
         RETURN _audit_live_row(p_table, p_object_id, v_spec);
     END IF;

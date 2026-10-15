@@ -23,6 +23,9 @@ BEGIN
     IF to_regclass('{tracking_table}') IS NULL THEN
         RETURN NULL;
     END IF;
+    IF NOT has_table_privilege('{tracking_table}', 'SELECT') THEN
+        RETURN NULL;
+    END IF;
     SELECT r.spec_fingerprint INTO v_spec
     FROM {tracking_table} r
     WHERE r.table_name = p_table

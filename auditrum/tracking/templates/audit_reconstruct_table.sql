@@ -15,7 +15,7 @@ BEGIN
           AND a.old_data IS NULL AND a.new_data IS NULL
     );
     IF v_spec IS NULL AND v_has_diff_rows THEN
-        RAISE EXCEPTION 'auditrum: table % has diff-only audit rows but no entry in {tracking_table}', p_table;
+        RAISE EXCEPTION 'auditrum: table % has diff-only audit rows but no readable entry in {tracking_table} (missing row or no SELECT privilege)', p_table;
     END IF;
 
     -- Same rules as _audit_reconstruct_row, per object_id.

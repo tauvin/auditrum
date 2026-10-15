@@ -165,7 +165,7 @@ class TestReconstructRowDiffOnly:
             cur.execute("UPDATE items SET name = 'b' WHERE id = 1")
             cur.execute("DELETE FROM auditrum_applied_triggers")
         with pytest.raises(
-            psycopg.errors.RaiseException, match="no entry in auditrum_applied_triggers"
+            psycopg.errors.RaiseException, match="no readable entry in auditrum_applied_triggers"
         ):
             row_at(conn, mid)
 
@@ -235,6 +235,41 @@ class TestReconstructRowDiffOnly:
             try:
                 with pytest.raises(psycopg.errors.InsufficientPrivilege):
                     cur.execute("SELECT _audit_reconstruct_row('items', '1', %s)", (mid,))
+                cur.execute("RESET ROLE")
+                cur.execute("GRANT SELECT ON items TO tt_reader")
+                cur.execute("SET ROLE tt_reader")
+                cur.execute("SELECT _audit_reconstruct_row('items', '1', %s)", (mid,))
+                assert cur.fetchone()[0] == {"id": 1, "name": "a", "secret": "s", "n": 1}
+            finally:
+                cur.execute("RESET ROLE")
+                cur.execute("DROP OWNED BY tt_reader")
+                cur.execute("DROP ROLE tt_reader")
+
+    @pytest.mark.parametrize("storage", ["full", "diff"])
+    def test_without_registry_select(self, items, storage):
+        conn = items
+        install(conn, TrackSpec(table="items", storage=storage))
+        with conn.cursor() as cur:
+            cur.execute("INSERT INTO items VALUES (1, 'a', 's', 1)")
+            mid = now(conn)
+            cur.execute("UPDATE items SET name = 'b' WHERE id = 1")
+            cur.execute("DROP ROLE IF EXISTS tt_reader")
+            cur.execute("CREATE ROLE tt_reader")
+            cur.execute("GRANT USAGE ON SCHEMA public TO tt_reader")
+            cur.execute("GRANT SELECT ON auditlog, items TO tt_reader")
+            cur.execute("SET ROLE tt_reader")
+            try:
+                if storage == "full":
+                    cur.execute("SELECT * FROM _audit_reconstruct_table('items', %s)", (mid,))
+                    assert cur.fetchall() == [("1", {"id": 1, "name": "a", "secret": "s", "n": 1})]
+                    cur.execute("SELECT _audit_reconstruct_row('items', '2', %s)", (mid,))
+                    assert cur.fetchone()[0] is None
+                else:
+                    match = "no readable entry in auditrum_applied_triggers"
+                    with pytest.raises(psycopg.errors.RaiseException, match=match):
+                        cur.execute("SELECT * FROM _audit_reconstruct_table('items', %s)", (mid,))
+                    with pytest.raises(psycopg.errors.RaiseException, match=match):
+                        cur.execute("SELECT _audit_reconstruct_row('items', '1', %s)", (mid,))
             finally:
                 cur.execute("RESET ROLE")
                 cur.execute("DROP OWNED BY tt_reader")
@@ -285,7 +320,7 @@ class TestReconstructTable:
             cur.execute("INSERT INTO items VALUES (1, 'a', 's', 1)")
             cur.execute("DELETE FROM auditrum_applied_triggers")
         with pytest.raises(
-            psycopg.errors.RaiseException, match="no entry in auditrum_applied_triggers"
+            psycopg.errors.RaiseException, match="no readable entry in auditrum_applied_triggers"
         ):
             table_at(conn, now(conn))
 
