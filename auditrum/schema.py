@@ -123,8 +123,8 @@ def generate_audit_current_user_id_sql(
 
 def generate_auditlog_table_sql(table_name: str = "auditlog", diff_gin_index: bool = False) -> str:
     validate_identifier(table_name, "table_name")
-    # The diff GIN index is opt-in (issue #6): production measurements on two
-    # deployments found it gets 0 scans yet costs 700-860 MB per monthly
+    # The diff GIN index is opt-in (issue #6): production observations
+    # found it gets 0 scans yet costs hundreds of MB per monthly
     # partition and is re-maintained on every audited write. It only helps
     # apps that run `WHERE diff @> '{...}'` jsonb-containment queries.
     base_sql = f"""

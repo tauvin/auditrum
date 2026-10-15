@@ -1,11 +1,10 @@
 """Make the audit log ``diff`` GIN index opt-in (issue #6).
 
 The GIN index on the ``diff`` jsonb column was created unconditionally by
-``0001_initial``. Production measurements on two independent deployments
-(catalog, bidwise) found it gets **0 scans** yet costs **700-860 MB per
-monthly partition** and is re-maintained on every audited write. It only
-helps apps that run ``WHERE diff @> '{...}'`` jsonb-containment queries,
-which neither deployment does — so it is now opt-in via the
+``0001_initial``. Production observations found it gets **0 scans** yet costs **hundreds
+of MB per monthly partition** and is re-maintained on every audited
+write. It only helps apps that run ``WHERE diff @> '{...}'``
+jsonb-containment queries, which the observed deployments do not — so it is now opt-in via the
 ``PGAUDIT_DIFF_GIN_INDEX`` setting (default ``False``).
 
 This migration is a **one-shot convergence**: on first apply it brings the

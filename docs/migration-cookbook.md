@@ -312,7 +312,7 @@ A variant of Recipe 4, but the failure mode is subtler: you adopted
 auditrum, marked your models with ``@track``, and the new ``auditlog``
 is filling up correctly — but an **older home-grown audit trigger,
 predating auditrum**, is still firing on the same tables. It writes to
-a *separate* legacy table (we hit this with a ``common_auditlog``), so
+a *separate* legacy table (for example ``legacy_audit_log``), so
 every audited write now pays for **two** triggers and lands two rows.
 Nothing is broken, so it's easy to miss; you just silently doubled the
 write overhead.
@@ -357,7 +357,7 @@ FROM pg_trigger t
 WHERE t.tgname = 'myapp_order_audit_trigger';
 ```
 
-The ``INSERT INTO common_auditlog ...`` (or whatever target) inside
+The ``INSERT INTO legacy_audit_log ...`` (or whatever target) inside
 the function body confirms it's the legacy path.
 
 ### Step 2 — Decide what to keep
@@ -369,7 +369,7 @@ archive rather than dropping it. Check the coverage overlap:
 
 ```sql
 SELECT min(changed_at) FROM auditlog;          -- auditrum's earliest row
-SELECT min(created_at)  FROM common_auditlog;   -- legacy's earliest row
+SELECT min(created_at)  FROM legacy_audit_log;   -- legacy's earliest row
 ```
 
 If the legacy ``min()`` is older than auditrum's, the legacy table is
@@ -382,10 +382,10 @@ queryable.
 Reads of the legacy table will keep working after you drop its
 triggers — the table itself stays. But confirm nothing depends on it
 *continuing to receive new rows* (a report that joins recent
-``common_auditlog`` activity, a reconciliation job, a dashboard):
+``legacy_audit_log`` activity, a reconciliation job, a dashboard):
 
 ```bash
-rg -n "common_auditlog" --type py --type sql
+rg -n "legacy_audit_log" --type py --type sql
 ```
 
 If a live reader needs fresh data, migrate it to auditrum's

@@ -149,11 +149,10 @@ Tuning options:
 ## 8. Drop the unused GIN-on-diff index
 
 Historically auditrum created ``auditlog_diff_gin_idx ON auditlog USING
-GIN (diff)`` by default. On the two production deployments we have real
-numbers for, that index recorded **0 scans** while costing **700–860 MB
-per monthly partition** — and it's re-maintained on *every* audited
-write, so it's pure write tax plus disk for those workloads. See the
-measured figures in [Performance → Index footprint](performance.md#index-footprint-a-tuning-finding).
+GIN (diff)`` by default. In production use, that index recorded **0 scans** while costing
+**hundreds of MB per monthly partition** — and it's re-maintained on *every* audited
+write, so it's pure write tax plus disk for those workloads. See
+[Performance → Field observations](performance.md#field-observations).
 
 ### When it helps vs. when it doesn't
 

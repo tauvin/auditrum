@@ -3,14 +3,12 @@
 Ad-hoc SQL and tooling for running auditrum in production. These
 are **not** part of the supported public API — they're utilities
 that either poke at runtime state for troubleshooting, or collect
-the numbers that eventually fill in `docs/performance.md` and the
-case studies.
+the numbers that eventually fill in `docs/performance.md`.
 
 ## `collect-perf-numbers.sql`
 
 Pulls everything we need to fill in
-[`docs/performance.md`](../docs/performance.md) and the
-[catalog case study](../docs/case-studies/catalog.md) from a live
+[`docs/performance.md`](../docs/performance.md) from a live
 database. Non-invasive; read-only; skips gracefully if optional
 extensions (pg_stat_statements) aren't installed.
 
@@ -60,7 +58,7 @@ loaded.
    matches your retention policy.
 
 4. **Review the output** against the placeholders in
-   `docs/performance.md` and `docs/case-studies/catalog.md`. Fill
+   `docs/performance.md`. Fill
    in the tables. Commit.
 
 ### What each section feeds
@@ -71,11 +69,11 @@ loaded.
 | 2. event rate + volume              | `performance.md` → "Audit events / second", volume numbers  |
 | 3. partition disk size              | `performance.md` → "Monitoring" prose, dashboard context    |
 | 3a. retention lag                   | `performance.md` → operational runbook reference            |
-| 3b. avg row size                    | `case-studies/catalog.md` → "Workload shape" prose          |
+| 3b. avg row size                    | workload-shape notes                                        |
 | 4. INSERT roundtrip via pg_stat_statements | `performance.md` → "Trigger overhead" table, application-side delta |
-| 5. INSERT integrity cross-check     | operational sanity (goes in case-study "What broke" if applicable) |
-| 6. hash chain status                | `case-studies/catalog.md` → "Workload shape" prose          |
-| 7. context source distribution      | `case-studies/catalog.md` → integration-patterns section    |
+| 5. INSERT integrity cross-check     | operational sanity (note any findings in your field observations) |
+| 6. hash chain status                | workload-shape notes                                        |
+| 7. context source distribution      | integration notes                                           |
 
 ### What the script does not measure
 

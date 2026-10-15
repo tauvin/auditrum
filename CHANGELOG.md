@@ -279,8 +279,8 @@ The two trigger fixes change the trigger body: run ``auditrum_makemigrations`` a
 
 - **The ``diff`` GIN index is now opt-in (default off).** auditrum
   previously created a GIN index on the audit log's ``diff`` jsonb column
-  unconditionally. Production measurements on two independent deployments
-  found this index gets **0 scans** yet costs **700-860 MB per monthly
+  unconditionally. Production measurements
+  found this index gets **0 scans** yet costs **hundreds of MB per monthly
   partition** and is re-maintained on every audited write — it only pays
   off if the app runs ``WHERE diff @> '{...}'`` jsonb-containment queries.
   It is now gated behind the ``diff_gin_index`` parameter of
@@ -381,7 +381,7 @@ The two trigger fixes change the trigger body: run ``auditrum_makemigrations`` a
 ### Fixed
 
 - **``Model.objects.create`` no longer returns a UUID as the pk.**
-  Reported by the eridan-catalog team on 0.4.2 after integrating
+  Reported by an early adopter on 0.4.2 after integrating
   the async-ORM fix below. The context-propagation wrapper prepends
   ``SELECT set_config(...);`` to every user statement — turning a
   single ``INSERT … RETURNING id`` into a two-statement submission.
@@ -499,7 +499,7 @@ The two trigger fixes change the trigger body: run ``auditrum_makemigrations`` a
   ``tests/integration/test_refresh_schema_pg.py`` replaces a live
   ``jsonb_diff`` with the 0.3 body, runs both the migration and
   the command, and asserts the paired body is restored — exactly
-  the regression catalog's 0.4.1 upgrade hit.
+  the regression an early adopter's 0.4.1 upgrade hit.
 
   From 0.4 onwards, every release that changes a
   ``generate_*_sql`` body ships a corresponding
@@ -1278,7 +1278,7 @@ extras". If you were on 0.2.0, expect a migration step (see
   result, and we no longer track pgtrigger's release cadence.
 - **Dead code in `integrations/django/utils.py`**: a leftover
   `get_changed_object()` helper referenced an undefined `apps` global
-  and hard-coded an unrelated auction-domain model list. Gone.
+  and hard-coded an unrelated, project-specific model list. Gone.
 - **Broken `from apps.audit.models import AuditLog`** at the top of
   `integrations/django/mixins.py` — a leftover from the original
   internal project. Fixed to import from our own models.

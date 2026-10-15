@@ -50,9 +50,9 @@ source, and the panels populate from metrics exposed by
 
 ## What the numbers look like in practice
 
-Real-world numbers from catalog's production deployment land in
-[`docs/performance.md`](../../docs/performance.md) under the
-"Monitoring" section. The dashboards themselves are meant to be
+Real-world observations from production use are in
+[`docs/performance.md`](../../docs/performance.md) under
+"Field observations". The dashboards themselves are meant to be
 usable **before** you've collected those numbers — they show the
 right panels with the right y-axis units so you're not re-discovering
 what to look at when you're already on fire.

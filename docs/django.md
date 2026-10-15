@@ -417,7 +417,7 @@ with auditrum_context(source="script"):
 
 Earlier 0.4 releases left this up to the caller and a few
 downstream teams hit pks set to the context UUID string (see
-CHANGELOG entry on the eridan-catalog report) — that's fixed
+CHANGELOG entry on the report) — that's fixed
 transparently from 0.4.3 onward.
 
 ## Hash chain (tamper-evidence)

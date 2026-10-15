@@ -7,7 +7,7 @@ under heavy concurrency.
 
 The benchmark measures the uncontended case (single writer) to set
 the baseline, then the concurrency section would land once we run
-these against catalog's real load to get the ceiling number.
+these against a production-like load to get the ceiling number.
 """
 
 from __future__ import annotations

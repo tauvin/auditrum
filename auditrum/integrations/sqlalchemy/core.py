@@ -200,7 +200,7 @@ def bootstrap_schema(
 
     ``diff_gin_index`` (default ``False``) is opt-in per issue #6: the GIN
     index on the ``diff`` jsonb column gets 0 scans in practice yet costs
-    700-860 MB per monthly partition. Set ``True`` only if you query the
+    hundreds of MB per monthly partition. Set ``True`` only if you query the
     audit log with ``WHERE diff @> '{...}'``.
     """
     parts = [

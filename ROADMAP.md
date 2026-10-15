@@ -41,38 +41,37 @@ be true:
    numbers in the README, with the methodology to reproduce them.
 3. **The version matrix is real.** CI tests the cartesian product of
    supported PostgreSQL × Python × Django versions, not one cell.
-4. **Multiple production deployments exist.** Catalog + sister projects
+4. **Multiple production deployments exist.** Early production users
    are committed; we want them shipping real audit data through 0.4–0.7
    and feeding bug reports back into the cycle.
 
 ## First production users — already onboarding
 
-The library is being adopted at the same company that owns
-**catalog** (an auction catalog with high-churn ``item`` and ``sale``
-tables — ~7M audit events in pre-prod) plus a
-few sister projects. Integration starts on **0.3.1** — they are the
+The library is being adopted by a few early production users, on
+high-churn Django / PostgreSQL workloads. Integration starts on
+**0.3.1** — they are the
 real-world feedback loop for the entire pre-1.0 cycle, not a
 "find users" milestone we worry about at the end.
 
 Concrete consequences for the roadmap:
 
-* **All early testing is Django.** Every project at the company runs
+* **All early testing is Django.** Every early production user runs
   on Django, so 0.4–0.7 development is exclusively Django-focused.
   SQLAlchemy / FastAPI / async support move out of the pre-1.0
   cycle entirely (see "Post-1.0 features" below).
-* **Bug reports from catalog become regression tests.** Each issue
-  catalog hits in production lands as a test in ``tests/`` before the
+* **Bug reports from early users become regression tests.** Each issue
+  they hit in production lands as a test in ``tests/`` before the
   fix ships. The 0.3.x / 0.4 reactive cycles exist specifically to
   catch the things that only surface under real production traffic —
   every bug caught so far (``content_type`` NULL rendering, paired
   diff format, admin search crash, template references to fields that
-  don't exist) came from catalog integration, not internal QA.
-* **Performance benchmarks are tied to catalog's real workload, not
-  synthetic ones.** Numbers in the 0.5 README come from instrumented
-  catalog pre-prod, not from a fake test schema. This makes the
+  don't exist) came from early production integration, not internal QA.
+* **Performance benchmarks are tied to real workloads, not
+  synthetic ones.** Real-world performance observations (anonymised)
+  live in ``docs/performance.md``, not just a fake test schema. This makes the
   "compliance-grade" claim defensible with a concrete reference.
-* **Security and compliance features mature against real catalog data.**
-  If catalog's roadmap includes GDPR-relevant fields, pseudonymization
+* **Security and compliance features mature against real data.**
+  If an early user's roadmap includes GDPR-relevant fields, pseudonymization
   timing shifts with their regulatory deadline — see "Open questions".
 
 ---
@@ -81,22 +80,22 @@ Concrete consequences for the roadmap:
 
 ### 0.3.x — Production hardening (shipped; reactive cycle now runs inside 0.4)
 
-**Theme:** the catalog integration happened on 0.3.x. Everything that
+**Theme:** the first production integration happened on 0.3.x. Everything that
 broke in production became a 0.3.x bugfix release. Stays a "reactive"
-cycle — no new features, only fixes for things catalog hits. The
+cycle — no new features, only fixes for things early users hit. The
 fixes are now rolling up into 0.4 rather than a separate patch line,
 since 0.4 itself has not shipped yet.
 
 - [x] Workflow + CI green (0.3.1)
-- [x] First catalog integration on the dev/staging cluster
-- [x] Catalog rolls out to production
+- [x] First integration on a dev/staging cluster
+- [x] First early user rolls out to production
 - [x] Bug fixes from production reports — each becomes a regression test
       (``content_type`` / admin template / paired diff / admin search
       ForeignKey crash are in ``[Unreleased]``)
-- [ ] Sister project #1 starts integration
-- [ ] Sister project #2 starts integration
+- [ ] Second early user starts integration
+- [ ] Third early user starts integration
 
-**Done when:** Catalog is running in production for at least 2 weeks
+**Done when:** The first early user is running in production for at least 2 weeks
 without auditrum-related incidents and we've stopped receiving new
 bug reports for a release cycle.
 
@@ -142,7 +141,7 @@ later.
 - [x] **Remove all dead code** found during the audit — ``vulture``
   + ``ruff F401/F811/F841`` pass; the 13 candidates were all
   protocol-required parameters or ``TYPE_CHECKING``-only imports.
-- [x] **Reactive bug fixes from catalog integration** (folded into
+- [x] **Reactive bug fixes from early production integration** (folded into
   0.4 rather than a separate 0.3.x patch line):
   - ``content_type_id`` column + ``AuditLog.content_type``
     GenericForeignKey removed; admin history view routes through
@@ -164,7 +163,7 @@ later.
     of bug that slipped through unit tests).
 
 **Done when:** the type gate and the coverage gate pass in CI;
-``api-stability.md`` is published; catalog runs on 0.4 without new
+``api-stability.md`` is published; early users run on 0.4 without new
 bug reports caused by the cleanup.
 
 **Effort:** ~3 weeks. This is the most important pre-1.0 milestone —
@@ -180,7 +179,7 @@ Decision locked in 2026-04-23; see Open questions below.
 ### 0.5 — Performance baseline & multi-version matrix
 
 **Theme:** prove the claims hold under real production load. Benchmarks
-driven by catalog's actual workload. Multi-version CI to lock the
+driven by real-world workloads. Multi-version CI to lock the
 support matrix before 1.0 makes a public commitment to it.
 
 - [x] **Benchmark suite in ``benchmarks/``** using ``pytest-benchmark``:
@@ -191,12 +190,11 @@ support matrix before 1.0 makes a public commitment to it.
   ceiling under concurrency** and the **10M-row** profile are deferred —
   see "Deferred measurements" below.
 - [x] **Numbers published in docs.** ``docs/performance.md`` now carries
-  real numbers from **two production deployments** (catalog pre-prod and
-  bidwise prod, both PG 17): trigger overhead ~0.3–1.4 ms/write,
-  time-travel ~5–11 ms at 570–2207 revisions, 25 GB / 10 GB footprints,
-  ~49 events/s real prod peak — plus a reproducible reference
-  microbenchmark and the methodology. The GIN-on-diff finding (0 scans on
-  both deployments) drove making that index opt-in (#6).
+  anonymised field observations from production use (overhead scales
+  with row width, time-travel is sub-linear in history depth) — plus a
+  reproducible reference microbenchmark and the methodology. The
+  GIN-on-diff finding (0 scans in production) drove making that index
+  opt-in (#6).
 - [x] **Multi-version CI matrix.** A 6-cell diagonal in ``ci.yml``
   covering the cartesian space without paying for all 30 combinations:
   - PostgreSQL **13, 14, 15, 16, 17** (one per cell, via the
@@ -227,10 +225,10 @@ These need a quiet production window or a restored prod dump, so they are
 intentionally postponed to the pre-release validation pass rather than
 blocking 0.5:
 
-- **Hash-chain throughput ceiling under concurrency.** Both production
+- **Hash-chain throughput ceiling under concurrency.** Early production
   deployments run with the chain *disabled*, so there are no real-load
   numbers for the advisory-lock serialisation. A controlled load-test
-  runbook (restore a bidwise dump locally, ``pgbench`` sweep chain-on vs
+  runbook (restore a production-like dump locally, ``pgbench`` sweep chain-on vs
   -off across writer counts) is ready to run in a quiet window.
 - **Connection-pooling smoke tests** — pgbouncer transaction mode + Django
   ``CONN_MAX_AGE > 0``, hunting ``is_local`` GUC leaks against a real
@@ -239,9 +237,9 @@ blocking 0.5:
   streaming bound is already measured at 50k).
 
 **Done when:** ✅ benchmark suite landed; ``docs/performance.md`` carries
-real numbers from two production deployments; CI matrix is green across
-the support surface; auditrum is running in production (catalog + bidwise)
-with measured overhead documented. The deferred load/concurrency
+anonymised field observations from production use; CI matrix is green across
+the support surface; auditrum is running in production
+with observed overhead documented. The deferred load/concurrency
 measurements move to the pre-release (RC) validation pass.
 
 **Effort:** delivered. The deferred items are RC-window work; their risk
@@ -265,16 +263,14 @@ asking questions.
   re-anchoring), upgrades, and a rollback playbook. (PR #19)
 - [x] **Migration cookbook** — greenfield / django-pghistory /
   django-simple-history / custom triggers, plus a real
-  "remove a legacy in-house audit trigger" recipe from bidwise. (PR #11)
+  "remove a legacy in-house audit trigger" recipe. (PR #11)
 - [x] **Performance tuning guide** — track_only / log_condition /
   partition pruning / GIN-on-diff drop, cross-referencing the 0.5
   numbers. (PR #11)
-- [x] **Catalog case study** — ``docs/case-studies/catalog.md`` with
-  real pre-prod numbers (7.2M events, overhead, time-travel, the
-  GIN finding). (PR #16)
-- [x] **Sister-project case study** — ``docs/case-studies/bidwise.md``
-  (production: ~49 events/s peak, deep histories, second GIN
-  confirmation, the incomplete-migration lesson). (PR #16)
+- [x] **Anonymised field observations** — qualitative production
+  findings in ``docs/performance.md`` (overhead vs row width,
+  time-travel depth scaling, the GIN finding, the legacy-trigger
+  lesson). (PR #16)
 - [x] **First-time setup walkthrough** — ``docs/quickstart.md``, ~5
   minutes from ``pip install`` to the first audit row + admin History
   view. (PR #20)
@@ -284,8 +280,8 @@ asking questions.
 
 **Done when:** ✅ API ref + all guides publish to GitHub Pages
 (``tauvin.github.io/auditrum`` via ``docs.yml``); the deployment guide
-covers running auditrum in production end to end; both the catalog and
-bidwise case studies are published with real numbers; a new user goes
+covers running auditrum in production end to end; anonymised field
+observations from production use are published; a new user goes
 from zero to first audit row in ~5 minutes via the Quickstart.
 
 **Effort:** delivered. All docs landed against the real numbers from the
@@ -306,10 +302,10 @@ features. Only fixes for blockers.
 - [ ] **Final security review** — repeat the three-pass review pattern
   from 0.3.1 (senior dev, security auditor, QA). Any new HIGH or
   CRITICAL findings block 1.0 and reset the RC clock.
-- [ ] **External pre-1.0 user** beyond the original company. Catalog
-  + sister projects are great real-world feedback but they share an
+- [ ] **External pre-1.0 user** beyond the original users. Early
+  production users are great real-world feedback but they share an
   organisational context. We want at least one independent user
-  (someone outside the original company) running an RC before 1.0
+  (someone outside that organisation) running an RC before 1.0
   to validate the docs.
 - [ ] **Full CHANGELOG for 1.0** with the cumulative diff against
   0.3.1.
@@ -318,7 +314,7 @@ features. Only fixes for blockers.
 
 **Done when:** 2+ weeks of RC period have passed without blocker bugs;
 external user has confirmed RC works in their environment; security
-review is clean; catalog + sister projects have all upgraded to the
+review is clean; early production users have all upgraded to the
 RC and reported back.
 
 **Effort:** ~1-2 weeks of work plus 2-4 weeks of waiting.
@@ -434,10 +430,10 @@ pre-1.0 cycle entirely.
 
 The phases most likely to slip:
 
-- **0.3.x reactive cycle.** Depends on what catalog hits in
+- **0.3.x reactive cycle.** Depends on what early users hit in
   production. Could be quick (no surprises) or could surface
   architectural issues that bump 0.4.
-- **0.5 (performance benchmarks).** Depends on what the catalog
+- **0.5 (performance benchmarks).** Depends on what the real-world
   numbers actually show. If trigger overhead is high, we have to
   optimise, which is open-ended work.
 - **0.7 (RC + external user).** Depends on external feedback that
@@ -481,9 +477,9 @@ These are decisions that affect roadmap shape but haven't been made:
    is too heavy to hold). Matches the "at least 12 months" wording
    already in the 1.0.0 section.
 5. **GDPR pseudonymization timing — pre-1.0 or 1.3?** Currently in
-   1.3. If catalog has a regulatory deadline that needs it sooner,
-   it could move into 0.5 or 0.6. **Need catalog's compliance team
-   to confirm whether they need it before 1.0.**
+   1.3. If an early user has a regulatory deadline that needs it sooner,
+   it could move into 0.5 or 0.6. **Need to confirm with early users
+   whether they need it before 1.0.**
 6. ~~**SQLAlchemy "experimental" status in 1.0.**~~ **Resolved
    2026-06-04:** ship it as ``experimental`` in ``__all__`` (API may
    change), with 1.1 promoting it to first-class + Alembic-autogenerate
