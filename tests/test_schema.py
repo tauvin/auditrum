@@ -202,6 +202,12 @@ class TestGenerateAuditReconstructSql:
         assert "object_id text" in sql
         assert "row_data jsonb" in sql
 
+    def test_all_functions_are_security_invoker(self):
+        sql = generate_audit_reconstruct_sql()
+        assert sql.count("STABLE SECURITY INVOKER") == 5
+        assert "SECURITY DEFINER" not in sql
+        assert "SET search_path" not in sql
+
     def test_custom_audit_table(self):
         sql = generate_audit_reconstruct_sql("custom_log")
         assert "FROM custom_log" in sql

@@ -57,7 +57,8 @@ $$ LANGUAGE plpgsql STABLE SECURITY INVOKER;
 CREATE OR REPLACE FUNCTION _audit_live_rows(p_table text, p_spec jsonb)
 RETURNS TABLE(object_id text, row_data jsonb) AS $$
 BEGIN
-    IF p_spec IS NULL OR p_spec->>'storage' IS DISTINCT FROM 'diff' THEN
+    -- The caller passes NULL when the live table is not needed.
+    IF p_spec IS NULL THEN
         RETURN;
     END IF;
     RETURN QUERY EXECUTE format(

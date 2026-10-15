@@ -1,12 +1,13 @@
 """Integration: diff-based reconstruction in _audit_reconstruct_row."""
 
+import random
 import uuid
 
 import psycopg
 import pytest
 
 from auditrum.executor import PsycopgExecutor
-from auditrum.timetravel import reconstruct_row
+from auditrum.timetravel import reconstruct_row, reconstruct_table
 from auditrum.tracking import FieldFilter, TrackSpec, TriggerManager
 
 
@@ -237,3 +238,120 @@ class TestReconstructRowDiffOnly:
                 cur.execute("RESET ROLE")
                 cur.execute("DROP OWNED BY tt_reader")
                 cur.execute("DROP ROLE tt_reader")
+
+
+def table_at(conn, at, table="items"):
+    return dict(reconstruct_table(conn, table=table, at=at))
+
+
+def strip(row, field_filter):
+    if field_filter.kind == "exclude":
+        return {k: v for k, v in row.items() if k not in field_filter.fields}
+    if field_filter.kind == "only":
+        return {k: v for k, v in row.items() if k in field_filter.fields}
+    return row
+
+
+class TestReconstructTable:
+    @pytest.mark.parametrize("storage", ["full", "diff"])
+    def test_table_at_points_in_time(self, items, storage):
+        conn = items
+        install(conn, TrackSpec(table="items", storage=storage))
+        with conn.cursor() as cur:
+            cur.execute("INSERT INTO items VALUES (1, 'a', 's', 1), (2, 'b', 's', 2)")
+            t1 = now(conn)
+            cur.execute("UPDATE items SET name = 'a2' WHERE id = 1")
+            cur.execute("DELETE FROM items WHERE id = 2")
+            t2 = now(conn)
+            cur.execute("INSERT INTO items VALUES (3, 'c', 's', 3)")
+        assert table_at(conn, t1) == {
+            "1": {"id": 1, "name": "a", "secret": "s", "n": 1},
+            "2": {"id": 2, "name": "b", "secret": "s", "n": 2},
+        }
+        assert table_at(conn, t2) == {"1": {"id": 1, "name": "a2", "secret": "s", "n": 1}}
+
+    def test_untracked_rows_are_included_for_diff_tables(self, items):
+        conn = items
+        with conn.cursor() as cur:
+            cur.execute("INSERT INTO items VALUES (1, 'pre', 's', 0)")
+        install(conn, TrackSpec(table="items", storage="diff"))
+        assert table_at(conn, now(conn)) == {"1": {"id": 1, "name": "pre", "secret": "s", "n": 0}}
+
+    def test_missing_registry_entry_raises(self, items):
+        conn = items
+        install(conn, TrackSpec(table="items", storage="diff"))
+        with conn.cursor() as cur:
+            cur.execute("INSERT INTO items VALUES (1, 'a', 's', 1)")
+            cur.execute("DELETE FROM auditrum_applied_triggers")
+        with pytest.raises(
+            psycopg.errors.RaiseException, match="no entry in auditrum_applied_triggers"
+        ):
+            table_at(conn, now(conn))
+
+    def test_switch_back_to_full_keeps_live_state(self, items):
+        conn = items
+        install(conn, TrackSpec(table="items", storage="diff"))
+        with conn.cursor() as cur:
+            cur.execute("INSERT INTO items VALUES (1, 'a', 's', 1)")
+            cur.execute("UPDATE items SET name = 'b' WHERE id = 1")
+        install(conn, TrackSpec(table="items"))
+        with conn.cursor() as cur:
+            cur.execute("ALTER TABLE items DISABLE TRIGGER USER")
+            cur.execute("INSERT INTO items VALUES (2, 'untracked', 's', 0)")
+            cur.execute("ALTER TABLE items ENABLE TRIGGER USER")
+        # Row 1 comes from the live table; row 2 has no events and the table is full now.
+        assert table_at(conn, now(conn)) == {"1": {"id": 1, "name": "b", "secret": "s", "n": 1}}
+
+
+FILTERS = [FieldFilter.all(), FieldFilter.exclude("secret"), FieldFilter.only("name", "n")]
+
+
+@pytest.mark.parametrize("field_filter", FILTERS, ids=lambda f: f.kind)
+@pytest.mark.parametrize("history", ["full", "diff", "full_then_diff", "full_then_diff_then_full"])
+@pytest.mark.parametrize("seed", range(3))
+def test_random_history_matches_ground_truth(items, field_filter, history, seed):
+    """Replay a random INSERT/UPDATE/DELETE sequence over three rows,
+    snapshot the real table after every step, then check that both
+    reconstruct functions return each snapshot at its timestamp."""
+    conn = items
+    rnd = random.Random(seed)
+    install(
+        conn,
+        TrackSpec(
+            table="items", fields=field_filter, storage="diff" if history == "diff" else "full"
+        ),
+    )
+    truth = []
+    with conn.cursor() as cur:
+        for step in range(40):
+            if history in ("full_then_diff", "full_then_diff_then_full") and step == 20:
+                install(conn, TrackSpec(table="items", fields=field_filter, storage="diff"))
+            if history == "full_then_diff_then_full" and step == 30:
+                install(conn, TrackSpec(table="items", fields=field_filter))
+            object_id = rnd.choice([1, 2, 3])
+            cur.execute("SELECT 1 FROM items WHERE id = %s", (object_id,))
+            exists = cur.fetchone() is not None
+            roll = rnd.random()
+            if not exists:
+                cur.execute(
+                    "INSERT INTO items VALUES (%s, %s, %s, %s)",
+                    (object_id, f"n{step}", f"s{step}", step),
+                )
+            elif roll < 0.15:
+                cur.execute("DELETE FROM items WHERE id = %s", (object_id,))
+            elif roll < 0.25:
+                cur.execute("UPDATE items SET secret = %s WHERE id = %s", (f"s{step}", object_id))
+            else:
+                cur.execute(
+                    "UPDATE items SET name = %s, n = %s WHERE id = %s",
+                    (f"v{step}", step, object_id),
+                )
+            at = now(conn)
+            cur.execute("SELECT id, to_jsonb(i) FROM items i")
+            truth.append((at, {str(pk): row for pk, row in cur.fetchall()}))
+
+    for at, rows in truth:
+        expected = {k: strip(v, field_filter) for k, v in rows.items()}
+        assert table_at(conn, at) == expected
+        for object_id in ("1", "2", "3"):
+            assert row_at(conn, at, object_id=object_id) == expected.get(object_id)
