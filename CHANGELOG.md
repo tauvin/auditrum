@@ -8,6 +8,8 @@ the API stabilises.
 
 ## [Unreleased]
 
+## [0.7.1] — 2026-10-15
+
 ### Fixed
 
 - **SQLAlchemy ``bootstrap_schema`` and ``sync`` work again.**
@@ -1343,7 +1345,8 @@ Initial public release. Adds the Django integration, the Typer-based
 CLI, and the first cut of trigger-based audit logging on partitioned
 PostgreSQL tables.
 
-[Unreleased]: https://github.com/tauvin/auditrum/compare/v0.7.0...HEAD
+[Unreleased]: https://github.com/tauvin/auditrum/compare/v0.7.1...HEAD
+[0.7.1]: https://github.com/tauvin/auditrum/compare/v0.7.0...v0.7.1
 [0.7.0]: https://github.com/tauvin/auditrum/compare/v0.6.2...v0.7.0
 [0.6.2]: https://github.com/tauvin/auditrum/compare/v0.6.1...v0.6.2
 [0.6.1]: https://github.com/tauvin/auditrum/compare/v0.6.0...v0.6.1
