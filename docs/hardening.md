@@ -172,11 +172,13 @@ change what they can read.
 ### Time-travel privileges
 
 `_audit_reconstruct_row` and `_audit_reconstruct_table` run as the
-caller. A role that calls them needs `SELECT` on the audit table, on
-`auditrum_applied_triggers` and, for tables in `storage="diff"` mode,
+caller. A role that calls them needs `SELECT` on the audit table and,
+for tables that have diff-only rows, on `auditrum_applied_triggers` and
 on the tracked table itself (the live row is part of the answer). A
-role without that last grant gets a permission error instead of a
-partial result.
+role without `SELECT` on the tracked table gets a permission error, and
+one without `SELECT` on the registry gets an error for those tables,
+instead of a partial result. Without `SELECT` on the registry, full
+tables still work.
 
 ## Hash chain for tamper detection
 

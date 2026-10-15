@@ -21,9 +21,10 @@ the API stabilises.
 ### Changed
 
 - **``_audit_reconstruct_row`` / ``_audit_reconstruct_table`` are
-  ``SECURITY INVOKER``.** The caller needs ``SELECT`` on the audit table,
-  ``auditrum_applied_triggers`` and, for diff tables, the tracked table.
-  Migration ``0006`` installs the new bodies.
+  ``SECURITY INVOKER``.** The caller needs ``SELECT`` on the audit table
+  and, for tables that have diff-only rows, on the tracked table and
+  ``auditrum_applied_triggers``. Migration ``0006`` installs the new
+  bodies.
 - **Reconstruction orders by ``id``, not ``changed_at``.** ``changed_at``
   is the transaction start, so a transaction that started earlier but
   wrote later used to be treated as the earlier change. Field history and
@@ -34,6 +35,20 @@ the API stabilises.
   stripped), a revert does not restore a column that event set to NULL.
 - For diff tables, ``reconstruct_table`` includes rows that existed before
   tracking was enabled.
+- Blame without ``field`` returns only the changed columns in
+  ``old_value`` / ``new_value`` for diff-only rows; full rows keep whole
+  snapshots.
+
+**Upgrading.** The trigger body changed (a dead variable was removed), so
+``auditrum.W001`` fires and ``auditrum_makemigrations --check`` fails until
+you run ``auditrum_makemigrations`` and ``migrate``; that writes one refresh
+migration per app with tracked models. Migration
+``0006_refresh_reconstruct_07`` installs the new reconstruct functions.
+Reading the history of diff tables needs ``SELECT`` on the tracked table
+and on ``auditrum_applied_triggers`` for the role that calls time travel;
+full tables need only ``SELECT`` on the audit table. The reconstruct
+functions no longer pin ``search_path``: they resolve the audit table, the
+registry and the helpers through the caller's ``search_path``.
 
 ## [0.6.2] — 2026-10-15
 

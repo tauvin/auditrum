@@ -18,9 +18,9 @@ _audit_reconstruct_table(p_table text, p_at timestamptz) RETURNS TABLE(object_id
 ```
 
 Both are `STABLE SECURITY INVOKER`: they run with the caller's
-privileges (see [Hardening](hardening.md#time-travel-privileges)). Each
-answer is computed by a single statement, so the live row and the audit
-events come from the same snapshot.
+privileges (see [Hardening](hardening.md#time-travel-privileges)). The
+functions are `STABLE`, so every statement inside them sees the caller's
+snapshot: the live row and the audit rows are consistent.
 
 **Ordering and the suffix.** Events are ordered by `id`, not by
 `changed_at`. `changed_at` is the transaction start time, so a
@@ -52,12 +52,14 @@ earlier.
 Backward replay never needs the original `INSERT`, so dropping old
 partitions stays safe.
 
-**The live row and the registry.** For diff tables the live row is
-read from the tracked table by primary key (`id`), and the field filter
-and storage mode come from `auditrum_applied_triggers`. A diff table
-that is missing from the registry raises an error when the live row is
-needed. `full` tables never need the live row for the snapshot path, so
-installs without a registry entry keep working.
+**The live row and the registry.** For tables that have diff-only rows
+the live row is read from the tracked table by primary key (`id`), and
+the field filter and storage mode come from `auditrum_applied_triggers`.
+Such a table raises an error when the live row is needed and the
+registry has no readable entry for it (the row is missing or the caller
+has no `SELECT` on the registry). `full` tables never need the live row
+for the snapshot path, so installs without a registry entry, and
+callers without `SELECT` on the registry, keep working.
 
 You can call these directly from SQL, or through the Python wrappers
 in `auditrum.timetravel`, or via the Django/SA helpers that ship on
@@ -262,7 +264,7 @@ loader.
   event is diff-only. Untracked rows (no events at all) appear in
   `reconstruct_table` only while the table is in diff mode.
 - **Privileges and errors.** `_audit_reconstruct_table` raises when
-  diff-only rows exist but the table has no registry entry.
+  diff-only rows exist but the table has no readable registry entry.
   `_audit_reconstruct_row` raises only when the requested row needs the
   live table.
 - **The reconstructable window is the retained window.** Once a

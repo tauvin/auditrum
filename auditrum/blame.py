@@ -63,8 +63,8 @@ def fetch_blame(
     """Fetch the audit history of a single row.
 
     Rows are ordered by ``id`` (write order). When ``field`` is given, filters in-Python
-    after the SQL pull so the index is still fully used — the field
-    narrow is small-cardinality relative to the row history.
+    after the SQL pull — the field narrow is small-cardinality relative
+    to the row history.
     """
     validate_identifier(audit_table, "audit_table")
     validate_identifier(context_table, "context_table")
