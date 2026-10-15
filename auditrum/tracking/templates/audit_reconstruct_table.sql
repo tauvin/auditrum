@@ -9,11 +9,16 @@ DECLARE
     v_has_diff_rows boolean;
 BEGIN
     -- Diff-only rows need the live table even if the table is full now.
-    v_has_diff_rows := EXISTS (
-        SELECT 1 FROM {audit_table} a
-        WHERE a.table_name = p_table AND a.diff IS NOT NULL
-          AND a.old_data IS NULL AND a.new_data IS NULL
-    );
+    -- In diff mode the live table is read anyway, so skip the scan.
+    IF NOT v_diff_mode THEN
+        v_has_diff_rows := EXISTS (
+            SELECT 1 FROM {audit_table} a
+            WHERE a.table_name = p_table AND a.diff IS NOT NULL
+              AND a.old_data IS NULL AND a.new_data IS NULL
+        );
+    ELSE
+        v_has_diff_rows := false;
+    END IF;
     IF v_spec IS NULL AND v_has_diff_rows THEN
         RAISE EXCEPTION 'auditrum: table % has diff-only audit rows but no readable entry in {tracking_table} (missing row or no SELECT privilege)', p_table;
     END IF;
