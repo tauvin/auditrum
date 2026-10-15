@@ -490,10 +490,14 @@ The hash chain cannot see rows changed without the trigger
 (`session_replication_role = replica`, a disabled trigger, `TRUNCATE`).
 `auditrum_verify_diff_chain` finds them by checking the audit log against
 itself and the live rows; it raises `CommandError` (non-zero exit) when it
-finds anything, so it works as a cron / monitoring alarm:
+finds anything. Alarm on a daily windowed run, and run `--full` weekly as
+a periodic audit to review, not to page on (its `chain` findings repeat on
+every run and cannot be acknowledged):
 
 ```bash
-# 0 3 * * * cd /srv/app && python manage.py auditrum_verify_diff_chain
+# daily alarm; two days so consecutive windows overlap
+# 0 3 * * * cd /srv/app && python manage.py auditrum_verify_diff_chain --since '2 days'
+# weekly audit: no alerting, review the output
 # 0 4 * * 0 cd /srv/app && python manage.py auditrum_verify_diff_chain --full
 ```
 
