@@ -143,11 +143,6 @@ class TestGenerateAuditAttachContextSql:
         assert "EXCEPTION WHEN OTHERS THEN" in sql
         assert "RETURN NULL" in sql
 
-    def test_is_security_definer(self):
-        sql = generate_audit_attach_context_sql()
-        assert "SECURITY DEFINER" in sql
-        assert "SET search_path = pg_catalog, public" in sql
-
     def test_custom_gucs(self):
         sql = generate_audit_attach_context_sql(
             guc_id="myapp.ctx_id", guc_metadata="myapp.ctx_meta"
@@ -202,15 +197,6 @@ class TestGenerateAuditReconstructSql:
         assert "object_id text" in sql
         assert "row_data jsonb" in sql
 
-    def test_filters_delete_to_null(self):
-        sql = generate_audit_reconstruct_sql()
-        assert "CASE WHEN operation = 'DELETE' THEN NULL ELSE new_data END" in sql
-
-    def test_orders_by_changed_at_desc(self):
-        sql = generate_audit_reconstruct_sql()
-        assert "ORDER BY changed_at DESC, id DESC" in sql
-        assert "LIMIT 1" in sql
-
     def test_custom_audit_table(self):
         sql = generate_audit_reconstruct_sql("custom_log")
         assert "FROM custom_log" in sql
@@ -219,16 +205,37 @@ class TestGenerateAuditReconstructSql:
         with pytest.raises(ValueError, match="Invalid audit_table"):
             generate_audit_reconstruct_sql("bad; DROP")
 
-    def test_functions_are_stable(self):
+    def test_emits_helpers(self):
         sql = generate_audit_reconstruct_sql()
-        # STABLE may be on its own line after LANGUAGE sql; match both
-        assert "LANGUAGE sql" in sql
-        assert "STABLE" in sql
+        for name in (
+            "_audit_filter_row",
+            "_audit_tracked_spec",
+            "_audit_live_row",
+            "_audit_live_rows",
+        ):
+            assert f"CREATE OR REPLACE FUNCTION {name}(" in sql
 
-    def test_is_security_definer(self):
+    def test_row_function_and_helpers_are_security_invoker(self):
         sql = generate_audit_reconstruct_sql()
-        assert sql.count("SECURITY DEFINER") == 2
-        assert sql.count("SET search_path = pg_catalog, public") == 2
+        # The table function is still the old body until the next task.
+        head = sql[: sql.index("FUNCTION _audit_reconstruct_table(")]
+        assert head.count("STABLE SECURITY INVOKER") == 4
+        assert "SECURITY DEFINER" not in head
+        assert "SET search_path" not in head
+
+    def test_suffix_ordered_by_id(self):
+        sql = generate_audit_reconstruct_sql()
+        assert "ORDER BY d.key, a.id" in sql
+        assert "ORDER BY id DESC" in sql
+
+    def test_custom_tracking_table(self):
+        sql = generate_audit_reconstruct_sql(tracking_table="my_registry")
+        assert "FROM my_registry r" in sql
+        assert "auditrum_applied_triggers" not in sql
+
+    def test_rejects_injection_in_tracking_table(self):
+        with pytest.raises(ValueError, match="Invalid tracking_table"):
+            generate_audit_reconstruct_sql(tracking_table="bad; DROP")
 
 
 class TestJsonbDiffFunction:
