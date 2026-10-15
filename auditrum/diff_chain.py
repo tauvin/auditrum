@@ -63,8 +63,11 @@ WITH spec AS (
     SELECT _audit_tracked_spec(%(table)s) AS s
 ),
 cols AS (
-    SELECT a.attname::text AS key, format_type(a.atttypid, a.atttypmod) AS col_type
+    -- A domain resolves to its base type; timestamptz(n) has the same type oid.
+    SELECT a.attname::text AS key,
+           COALESCE(NULLIF(t.typbasetype, 0), a.atttypid) = 'timestamptz'::regtype AS is_tstz
     FROM pg_attribute a
+    JOIN pg_type t ON t.oid = a.atttypid
     WHERE a.attrelid = quote_ident(%(table)s)::regclass
       AND a.attnum > 0
       AND NOT a.attisdropped
@@ -103,7 +106,7 @@ kv AS (
            LAG(CASE WHEN n.paired THEN n.value -> 'new' ELSE n.value END) OVER w AS prev_new,
            LAG(n.id) OVER w AS prev_id,
            row_number() OVER (PARTITION BY n.object_id, n.key ORDER BY n.id DESC) AS rn_desc,
-           c.col_type
+           COALESCE(c.is_tstz, false) AS is_tstz
     FROM entries n
     LEFT JOIN cols c ON c.key = n.key
     WINDOW w AS (PARTITION BY n.object_id, n.key ORDER BY n.id)
@@ -116,7 +119,7 @@ mismatches AS (
            k.changed_at
     FROM kv k
     WHERE k.paired AND k.prev_id IS NOT NULL
-      AND CASE WHEN k.col_type = 'timestamp with time zone'
+      AND CASE WHEN k.is_tstz
                     AND jsonb_typeof(k.old_v) = 'string' AND jsonb_typeof(k.prev_new) = 'string'
                THEN (k.old_v #>> '{{}}')::timestamptz IS DISTINCT FROM (k.prev_new #>> '{{}}')::timestamptz
                ELSE k.old_v IS DISTINCT FROM k.prev_new END
@@ -146,7 +149,7 @@ mismatches AS (
            NULL
     FROM kv k JOIN live l ON l.object_id = k.object_id
     WHERE k.rn_desc = 1 AND l.row_data ? k.key
-      AND CASE WHEN k.col_type = 'timestamp with time zone'
+      AND CASE WHEN k.is_tstz
                     AND jsonb_typeof(k.new_v) = 'string' AND jsonb_typeof(l.row_data -> k.key) = 'string'
                THEN (k.new_v #>> '{{}}')::timestamptz IS DISTINCT FROM (l.row_data ->> k.key)::timestamptz
                ELSE k.new_v IS DISTINCT FROM l.row_data -> k.key END

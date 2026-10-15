@@ -300,3 +300,33 @@ def test_timestamptz_written_and_checked_in_different_zones_is_clean(items):
         assert verify_diff_chain(items, table="vc_items", full=True) == []
     finally:
         set_timezone(items, original)
+
+
+def test_timestamptz_with_precision_and_domain_compare_by_value(items):
+    with items.cursor() as cur:
+        cur.execute("DROP DOMAIN IF EXISTS vc_instant CASCADE")
+        cur.execute("CREATE DOMAIN vc_instant AS timestamptz")
+        cur.execute("ALTER TABLE vc_items ADD COLUMN at3 timestamptz(3), ADD COLUMN atd vc_instant")
+        cur.execute("SHOW TimeZone")
+        original = cur.fetchone()[0]
+    tracked(items)
+    try:
+        set_timezone(items, "UTC")
+        with items.cursor() as cur:
+            cur.execute(
+                "INSERT INTO vc_items VALUES "
+                "(1, 'a', 's', 0, '2026-10-01 12:00:00.123+00', '2026-10-01 12:00+00')"
+            )
+        set_timezone(items, "Asia/Tokyo")
+        with items.cursor() as cur:
+            cur.execute(
+                "UPDATE vc_items SET at3 = '2026-10-02 12:00:00.456+00', "
+                "atd = '2026-10-02 12:00+00' WHERE id = 1"
+            )
+        set_timezone(items, "America/New_York")
+        assert verify_diff_chain(items, table="vc_items", full=True) == []
+    finally:
+        set_timezone(items, original)
+        with items.cursor() as cur:
+            cur.execute("DROP TABLE IF EXISTS vc_items CASCADE")
+            cur.execute("DROP DOMAIN IF EXISTS vc_instant CASCADE")
