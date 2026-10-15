@@ -460,6 +460,69 @@ A note on partitioning: this is unrelated to auditrum's partitioned
 there's no parent/partition trigger-propagation subtlety to worry
 about here.
 
+## Switching a table to diff storage
+
+To stop writing `old_data` / `new_data` for a table (see
+[Storage mode](concepts.md#storage-mode)), set `storage="diff"` on its
+spec and apply the change like any other trigger change:
+
+```python
+@track(storage="diff")
+class Order(models.Model): ...
+```
+
+```bash
+python manage.py auditrum_makemigrations
+python manage.py migrate
+```
+
+Rows already in `auditlog` keep their snapshots. Reconstruction decides
+per row, so a history that starts as `full` and continues as `diff`
+reads correctly; see [Time travel](time-travel.md#how-it-works). The
+switch is reversible the same way. It cannot be combined with
+`log_condition`.
+
+## Shrinking old partitions
+
+Switching modes does not rewrite existing rows. To reclaim the space of
+old snapshots for the diff tables, copy a month partition without
+`old_data` / `new_data`. The example assumes a partition `p` that no
+writer touches any more; do it inside a maintenance window.
+
+```sql
+BEGIN;
+
+CREATE TABLE p_new (LIKE p INCLUDING ALL);
+
+-- Rows of diff tables: drop the snapshots, keep everything else
+-- (including id: reconstruction orders by it).
+INSERT INTO p_new
+SELECT id, operation, changed_at, table_name, object_id, user_id,
+       NULL, NULL, diff, context_id, meta, row_hash, prev_hash
+FROM p
+WHERE table_name IN ('orders', 'invoices');   -- your diff tables
+
+-- Rows of every other table, untouched.
+INSERT INTO p_new
+SELECT * FROM p
+WHERE table_name NOT IN ('orders', 'invoices');
+
+ALTER TABLE auditlog DETACH PARTITION p;
+ALTER TABLE auditlog ATTACH PARTITION p_new
+    FOR VALUES FROM ('2026-01-01') TO ('2026-02-01');
+DROP TABLE p;
+
+COMMIT;
+```
+
+Adjust the column list to your `auditlog` (the hash-chain columns exist
+only if you enabled it). Only rows whose `diff` is in the paired
+`{old, new}` shape can lose their snapshots; rows written before 0.4
+carry a values-only `diff`, so leave those tables' old rows as they
+are. If the hash chain is enabled, this breaks it for the rewritten
+rows: `row_hash` / `prev_hash` were computed over the snapshots, and
+`auditrum verify-chain` will report them.
+
 ## Things to check after any migration
 
 1. **Trigger presence.** ``auditrum status`` lists all installed

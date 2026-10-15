@@ -8,6 +8,33 @@ the API stabilises.
 
 ## [Unreleased]
 
+### Added
+
+- **Diff-only storage mode.** ``TrackSpec(storage="diff")`` /
+  ``@track(storage="diff")`` / ``track_table(..., storage="diff")`` stops
+  writing ``old_data`` / ``new_data``; the paired ``diff`` becomes the only
+  copy of each change. Time travel, field history, blame, revert and the
+  admin read the diff, and a table can switch modes without touching old
+  rows. Not combinable with ``log_condition``. Run
+  ``auditrum_makemigrations`` after switching.
+
+### Changed
+
+- **``_audit_reconstruct_row`` / ``_audit_reconstruct_table`` are
+  ``SECURITY INVOKER``.** The caller needs ``SELECT`` on the audit table,
+  ``auditrum_applied_triggers`` and, for diff tables, the tracked table.
+  Migration ``0006`` installs the new bodies.
+- **Reconstruction orders by ``id``, not ``changed_at``.** ``changed_at``
+  is the transaction start, so a transaction that started earlier but
+  wrote later used to be treated as the earlier change. Field history and
+  blame order by ``id`` too.
+- **Revert only touches the columns the event changed.** Reverting an old
+  event no longer rolls back later changes to other columns. For rows
+  written by 0.3 (values-only ``diff`` with NULL-setting changes
+  stripped), a revert does not restore a column that event set to NULL.
+- For diff tables, ``reconstruct_table`` includes rows that existed before
+  tracking was enabled.
+
 ## [0.6.2] — 2026-10-15
 
 ### Fixed
