@@ -1,6 +1,8 @@
+import dataclasses
+import json
 from collections.abc import Callable
 from functools import lru_cache
-from typing import Any, Literal, cast
+from typing import Annotated, Any, Literal, cast
 
 import structlog
 import typer
@@ -10,6 +12,7 @@ from psycopg import sql as psycopg_sql
 from rich import print as rich_print
 
 from auditrum.blame import fetch_blame, format_blame
+from auditrum.diff_chain import list_registered_tables, parse_since, verify_diff_chain
 from auditrum.hardening import generate_grant_admin_sql, generate_revoke_sql
 from auditrum.hash_chain import generate_hash_chain_sql, verify_chain
 from auditrum.retention import drop_old_partitions, generate_purge_sql
@@ -376,6 +379,71 @@ def verify_chain_cmd(
         )
         for rid, reason in result["broken"]:
             rich_print(f"[red]  - row {rid}: {reason}[/red]")
+
+
+@app.command("verify-diff-chain")
+def verify_diff_chain_cmd(
+    table: Annotated[
+        list[str] | None,
+        typer.Option(
+            "--table", help="Table to check (repeatable). Default: every registered table."
+        ),
+    ] = None,
+    since: str = typer.Option(
+        "1 day", "--since", help="Window start: '1 day', '2 weeks', … or an ISO-8601 timestamp."
+    ),
+    full: bool = typer.Option(False, "--full", help="Check whole tables, not just the window."),
+    object_id: str | None = typer.Option(None, "--object-id", help="Check one object only."),
+    as_json: bool = typer.Option(False, "--json", help="Print findings as a JSON array."),
+    limit: int | None = typer.Option(None, "--limit", help="Report at most N findings."),
+    audit_table: str | None = typer.Option(None, "--audit-table"),
+    dsn: str | None = typer.Option(None, "--db-dsn"),
+    host: str | None = typer.Option(None, "--db-host"),
+    port: int | None = typer.Option(None, "--db-port"),
+    user: str | None = typer.Option(None, "--db-user"),
+    password: str | None = typer.Option(None, "--db-password"),
+    dbname: str | None = typer.Option(None, "--db-name"),
+) -> None:
+    """Find writes that bypassed the audit trigger. Exit 0 clean, 1 findings, 2 error."""
+    db_dsn = get_db_dsn(dsn, host, port, user, password, dbname)
+    if not db_dsn:
+        log.error("No database DSN provided")
+        raise typer.Exit(2)
+    resolved = resolve_audit_table(audit_table)
+    try:
+        since_at = None if full else parse_since(since)
+        findings = []
+        with connect(dsn=db_dsn) as conn:
+            for name in table or list_registered_tables(conn, resolved):
+                findings.extend(
+                    verify_diff_chain(
+                        conn,
+                        table=name,
+                        since=since_at,
+                        object_id=object_id,
+                        full=full,
+                        audit_table=resolved,
+                        limit=limit,
+                    )
+                )
+    except Exception as e:
+        log.error("Failed to verify the diff chain", error=str(e))
+        raise typer.Exit(2) from e
+    if limit is not None:
+        findings = findings[:limit]
+
+    if as_json:
+        print(json.dumps([dataclasses.asdict(f) for f in findings], default=str))
+    elif findings:
+        for f in findings:
+            column = f" {f.column}" if f.column else ""
+            rich_print(
+                f"[red]{f.table}:{f.object_id} event {f.audit_id} {f.kind}{column}: {f.detail}[/red]"
+            )
+        rich_print(f"[red]{len(findings)} finding(s)[/red]")
+    else:
+        rich_print("[green]diff chain OK[/green]")
+    raise typer.Exit(1 if findings else 0)
 
 
 @app.command()
