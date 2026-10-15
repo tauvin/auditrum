@@ -136,6 +136,13 @@ jobs:
       - name: Run tests with coverage
         run: uv run --no-sync --python ${{ matrix.python }} pytest tests/ -q --no-header --cov --cov-report=term
 
+      # The Django-on-Postgres integration tests skip themselves when a unit
+      # test module has already configured Django with SQLite, which is
+      # always the case in the full run above. Run the directory on its own
+      # so they execute against the matrix Postgres.
+      - name: Run integration tests in isolation
+        run: uv run --no-sync --python ${{ matrix.python }} pytest tests/integration -q --no-header
+
   lint:
     name: ruff
     runs-on: ubuntu-latest

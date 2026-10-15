@@ -155,8 +155,9 @@ python_functions = "test_*"
 # Default test discovery roots. Benchmarks live in a sibling tree and need
 # the ``benchmark`` extras + container setup; keep them out of plain pytest.
 testpaths = ["tests"]
-# Prepend ``*`` to keep hypothesis' default ignores while adding our own.
-norecursedirs = ["*", "benchmarks", ".venv", "build", "dist"]
+# Setting norecursedirs replaces pytest's defaults, so the relevant ones
+# (".*" covers .hypothesis / .venv, "*.egg") are restated here.
+norecursedirs = [".*", "*.egg", "benchmarks", "build", "dist"]
 
 [tool.coverage.run]
 # Coverage scope stays narrower than the pyrefly gate: the SQLAlchemy and
