@@ -8,6 +8,17 @@ the API stabilises.
 
 ## [Unreleased]
 
+### Added
+
+- **``verify-diff-chain``: find writes that bypassed the audit trigger.**
+  ``auditrum.diff_chain.verify_diff_chain()``, ``auditrum verify-diff-chain``
+  and ``manage.py auditrum_verify_diff_chain`` check per object and column
+  that each event's ``old`` matches the previous event's ``new``, that the
+  last event agrees with the live row, and that INSERT / DELETE match the
+  row's existence. A windowed run (``--since``, default one day) suits a
+  daily cron job; ``--full`` checks whole tables. Exit code 1 (or
+  ``CommandError``) when anything is found. No migration needed.
+
 ## [0.7.1] — 2026-10-15
 
 ### Fixed

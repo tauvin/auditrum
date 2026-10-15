@@ -210,6 +210,39 @@ auditrum verify-chain
 
 Good candidate for a nightly cron that alerts on failure.
 
+### `verify-diff-chain`
+
+Find writes that bypassed the audit trigger: per object and column, each
+event's `old` must match the previous event's `new`, the last event must
+match the live row, and INSERT / DELETE must match the row's existence.
+Full guide in [`diff-chain.md`](diff-chain.md).
+
+```bash
+# Objects with events in the last day (default window)
+auditrum verify-diff-chain
+
+# Whole tables, one table
+auditrum verify-diff-chain --full --table orders
+
+# One object, JSON output
+auditrum verify-diff-chain --table orders --object-id 42 --json
+```
+
+| Option | Meaning |
+|---|---|
+| `--table T` | Table to check, repeatable. Default: every registered table. |
+| `--since` | Window start: `'1 day'`, `'2 weeks'`, … or ISO-8601. Default `'1 day'`. |
+| `--full` | Check whole tables. Ignores `--since`. |
+| `--object-id ID` | Check one object. Without `--table` it applies to every registered table. |
+| `--json` | Print findings as a JSON array. |
+| `--limit N` | Report at most N findings in total. |
+| `--audit-table`, `--db-*` | As for the other commands. |
+
+Prints one finding per object (the first by event id). Exit 0 when
+clean, 1 with findings, 2 on error. With no registered tables it exits
+2 because nothing was checked. A table that cannot be checked is
+reported and skipped; the others are still checked, and the run exits 2.
+
 ---
 
 ## Retention

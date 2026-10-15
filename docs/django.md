@@ -484,6 +484,30 @@ the command reports it and exits non-zero like any other break.
 
 See [hardening](hardening.md) for the full threat model.
 
+### Diff chain check
+
+The hash chain cannot see rows changed without the trigger
+(`session_replication_role = replica`, a disabled trigger, `TRUNCATE`).
+`auditrum_verify_diff_chain` finds them by checking the audit log against
+itself and the live rows; it raises `CommandError` (non-zero exit) when it
+finds anything. Alarm on a daily windowed run, and run `--full` weekly as
+a periodic audit to review, not to page on (its `chain` findings repeat on
+every run and cannot be acknowledged):
+
+```bash
+# daily alarm; two days so consecutive windows overlap
+# 0 3 * * * cd /srv/app && python manage.py auditrum_verify_diff_chain --since '2 days'
+# weekly audit: no alerting, review the output
+# 0 4 * * 0 cd /srv/app && python manage.py auditrum_verify_diff_chain --full
+```
+
+Options: `--table` (repeatable), `--since` (default `'1 day'`), `--full`
+(ignores `--since`), `--object-id`, `--json`, `--limit`. Without `--table`
+every registered table is checked; with no registered tables it raises
+`CommandError` because nothing was checked. A table that cannot be
+checked is reported and skipped, and the command raises `CommandError`
+naming it after checking the others. See [Diff chain check](diff-chain.md).
+
 ## Tips and gotchas
 
 - **Tracked models must have a `pk`.** Composite primary keys are not

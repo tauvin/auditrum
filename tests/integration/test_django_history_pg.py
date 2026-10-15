@@ -26,6 +26,11 @@ django = pytest.importorskip("django")
 pytest.importorskip("psycopg")
 
 from django.conf import settings as django_settings  # noqa: E402
+from django.db import connection as django_connection  # noqa: E402
+
+from auditrum.diff_chain import verify_diff_chain  # noqa: E402
+from auditrum.executor import PsycopgExecutor  # noqa: E402
+from auditrum.tracking import TrackSpec, TriggerManager  # noqa: E402
 
 
 @pytest.fixture(scope="session")
@@ -505,3 +510,25 @@ def test_for_object_matches_context_metadata(fresh_auditlog, configured_django):
     assert log.context is not None
     assert log.context.metadata["source"] == "celery"
     assert log.context.metadata["change_reason"] == "nightly sync"
+
+
+def test_verify_diff_chain_through_django_connection(fresh_auditlog, configured_django):
+    """Django's connection returns jsonb as str; the registry spec must still decode."""
+    conn = fresh_auditlog
+    with conn.cursor() as cur:
+        cur.execute("DROP TABLE IF EXISTS vc_django CASCADE")
+        cur.execute("CREATE TABLE vc_django (id int PRIMARY KEY, name text)")
+    try:
+        mgr = TriggerManager(PsycopgExecutor(conn))
+        mgr.bootstrap()
+        mgr.install(TrackSpec(table="vc_django", storage="diff"), force=True)
+        with conn.cursor() as cur:
+            cur.execute("INSERT INTO vc_django VALUES (1, 'a')")
+            cur.execute("SET session_replication_role = replica")
+            cur.execute("UPDATE vc_django SET name = 'X' WHERE id = 1")
+            cur.execute("SET session_replication_role = origin")
+        [finding] = verify_diff_chain(django_connection, table="vc_django", full=True)
+        assert (finding.kind, finding.column, finding.actual) == ("live", "name", "X")
+    finally:
+        with conn.cursor() as cur:
+            cur.execute("DROP TABLE IF EXISTS vc_django CASCADE")

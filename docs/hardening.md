@@ -293,6 +293,13 @@ sustained DB access, pair with:
 - Cryptographic signing of batch exports.
 - Real WORM storage for the log (tangential but relevant).
 
+### Detecting writes that bypass the trigger
+
+Hash chain does not notice a row changed with
+`session_replication_role = replica`, a disabled trigger or `TRUNCATE`:
+no audit row exists to check. These writes break time-travel
+reconstruction. Detect them with [`verify-diff-chain`](diff-chain.md).
+
 ## Retention and purging
 
 Compliance regimes like GDPR require you to delete personal data on

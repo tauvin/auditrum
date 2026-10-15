@@ -277,6 +277,7 @@ loader.
   `session_replication_role = replica`, `ALTER TABLE ... DISABLE
   TRIGGER`, `TRUNCATE` and bulk loads that skip triggers leave no
   events, so a diff table reconstructs a wrong state around them.
+  Detect them with [`verify-diff-chain`](diff-chain.md).
 - **No PII masking on historical queries.** Time travel gives you
   back whatever was in the row at the time. If you need to comply with
   erasure requests, see the pseudonymization notes in
