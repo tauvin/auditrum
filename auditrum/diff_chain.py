@@ -94,8 +94,10 @@ entries AS (
     -- A paired entry is an object with exactly the keys old and new; anything
     -- else is a pre-0.4 values-only entry that carries just the new value.
     SELECT e.id, e.object_id, e.changed_at, d.key, d.value,
-           jsonb_typeof(d.value) = 'object' AND d.value ?& array['old', 'new']
-               AND (SELECT count(*) FROM jsonb_object_keys(d.value)) = 2 AS paired
+           CASE WHEN jsonb_typeof(d.value) = 'object'
+                THEN d.value ?& array['old', 'new']
+                     AND (SELECT count(*) FROM jsonb_object_keys(d.value)) = 2
+                ELSE false END AS paired
     FROM ev e
     CROSS JOIN LATERAL jsonb_each(e.diff) AS d(key, value)
 ),
