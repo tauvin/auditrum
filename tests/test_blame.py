@@ -297,3 +297,80 @@ class TestFetchBlameSql:
         assert len(entries) == 1
         assert entries[0].old_value is None
         assert entries[0].new_value == "a@x.com"
+
+    def _conn_with(self, rows):
+        cursor = MagicMock()
+        cursor.fetchall.return_value = rows
+        cursor.__enter__ = MagicMock(return_value=cursor)
+        cursor.__exit__ = MagicMock(return_value=False)
+        conn = MagicMock()
+        conn.cursor.return_value = cursor
+        return conn, cursor
+
+    def test_diff_only_rows_with_field(self):
+        ts = datetime(2024, 1, 1, tzinfo=UTC)
+        conn, _ = self._conn_with(
+            [
+                (
+                    ts,
+                    "INSERT",
+                    1,
+                    None,
+                    None,
+                    None,
+                    {"email": {"old": None, "new": "a@x.com"}},
+                    None,
+                ),
+                (
+                    ts,
+                    "UPDATE",
+                    1,
+                    None,
+                    None,
+                    None,
+                    {"email": {"old": "a@x.com", "new": "b@x.com"}},
+                    None,
+                ),
+                (
+                    ts,
+                    "DELETE",
+                    1,
+                    None,
+                    None,
+                    None,
+                    {"email": {"old": "b@x.com", "new": None}},
+                    None,
+                ),
+            ]
+        )
+        entries = fetch_blame(conn, table="users", object_id="42", field="email")
+        assert [(e.old_value, e.new_value) for e in entries] == [
+            (None, "a@x.com"),
+            ("a@x.com", "b@x.com"),
+            ("b@x.com", None),
+        ]
+
+    def test_diff_only_rows_without_field(self):
+        ts = datetime(2024, 1, 1, tzinfo=UTC)
+        conn, _ = self._conn_with(
+            [
+                (
+                    ts,
+                    "UPDATE",
+                    1,
+                    None,
+                    None,
+                    None,
+                    {"email": {"old": "a@x.com", "new": "b@x.com"}},
+                    None,
+                ),
+            ]
+        )
+        [entry] = fetch_blame(conn, table="users", object_id="42")
+        assert entry.old_value == {"email": "a@x.com"}
+        assert entry.new_value == {"email": "b@x.com"}
+
+    def test_orders_by_id(self):
+        conn, cursor = self._conn_with([])
+        fetch_blame(conn, table="users", object_id="42")
+        assert "ORDER BY a.id ASC" in str(cursor.execute.call_args[0][0])

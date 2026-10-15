@@ -6,8 +6,9 @@ import uuid
 import psycopg
 import pytest
 
+from auditrum.blame import fetch_blame
 from auditrum.executor import PsycopgExecutor
-from auditrum.timetravel import reconstruct_row, reconstruct_table
+from auditrum.timetravel import reconstruct_field_history, reconstruct_row, reconstruct_table
 from auditrum.tracking import FieldFilter, TrackSpec, TriggerManager
 
 
@@ -355,3 +356,16 @@ def test_random_history_matches_ground_truth(items, field_filter, history, seed)
         assert table_at(conn, at) == expected
         for object_id in ("1", "2", "3"):
             assert row_at(conn, at, object_id=object_id) == expected.get(object_id)
+
+
+def test_field_history_and_blame_on_diff_table(items):
+    conn = items
+    install(conn, TrackSpec(table="items", storage="diff"))
+    with conn.cursor() as cur:
+        cur.execute("INSERT INTO items VALUES (1, 'a', 's', 1)")
+        cur.execute("UPDATE items SET name = 'b' WHERE id = 1")
+        cur.execute("UPDATE items SET n = 2 WHERE id = 1")
+    history = reconstruct_field_history(conn, table="items", object_id="1", field="name")
+    assert [v for _, v in history] == ["a", "b"]
+    entries = fetch_blame(conn, table="items", object_id="1", field="name")
+    assert [(e.old_value, e.new_value) for e in entries] == [(None, "a"), ("a", "b")]

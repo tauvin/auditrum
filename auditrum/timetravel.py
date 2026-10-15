@@ -41,7 +41,7 @@ from collections.abc import Iterator
 from contextlib import nullcontext
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any
+from typing import Any, Literal
 
 from psycopg import sql as pg_sql
 
@@ -54,6 +54,13 @@ __all__ = [
     "reconstruct_row",
     "reconstruct_table",
 ]
+
+
+def _diff_side(diff: dict[str, Any] | None, side: Literal["old", "new"]) -> dict[str, Any] | None:
+    """Project a paired ``{col: {"old", "new"}}`` diff onto one side."""
+    if diff is None:
+        return None
+    return {k: v.get(side) if isinstance(v, dict) else None for k, v in diff.items()}
 
 
 @dataclass(frozen=True)
@@ -228,7 +235,7 @@ def reconstruct_field_history(
         "SELECT changed_at, operation, old_data, new_data, diff "
         "FROM {} "
         "WHERE table_name = %s AND object_id = %s "
-        "ORDER BY changed_at ASC, id ASC"
+        "ORDER BY id ASC"
     ).format(pg_sql.Identifier(audit_table))
 
     history: list[tuple[datetime, Any]] = []
@@ -243,12 +250,14 @@ def reconstruct_field_history(
             new_data = json.loads(new_data)
         if isinstance(diff, str):
             diff = json.loads(diff)
+        if new_data is None and operation != "DELETE":
+            new_data = _diff_side(diff, "new")
 
         if operation == "INSERT":
             if new_data and field in new_data:
                 history.append((changed_at, new_data[field]))
         elif operation == "UPDATE":
-            if diff and field in diff and new_data:
+            if diff and field in diff and new_data is not None:
                 history.append((changed_at, new_data.get(field)))
         elif operation == "DELETE":
             history.append((changed_at, None))
