@@ -88,3 +88,32 @@ class TestRevertRoundtrip:
             cur.execute("SELECT email FROM users WHERE id = %s", (user_id,))
             assert cur.fetchone()[0] == "b@old.com"
             cur.execute("DROP TABLE IF EXISTS users CASCADE")
+
+
+def test_revert_restores_typed_columns(fresh_auditlog):
+    """Revert used to assign ``->>`` text to every column, so any
+    non-text column failed with a type mismatch."""
+    conn = fresh_auditlog
+    with conn.cursor() as cur:
+        cur.execute("DROP TABLE IF EXISTS typed CASCADE")
+        cur.execute(
+            "CREATE TABLE typed (id int PRIMARY KEY, n int, ok boolean, "
+            "at timestamptz, tags text[], meta jsonb, name text)"
+        )
+        cur.execute(TrackSpec(table="typed").build().install_sql)
+        cur.execute(
+            "INSERT INTO typed VALUES "
+            "(1, 1, true, '2026-01-01T00:00:00Z', '{a,b}', '{\"x\": 1}', 'a')"
+        )
+        cur.execute("SELECT * FROM typed")
+        before = cur.fetchone()
+        cur.execute(
+            "UPDATE typed SET n = 2, ok = false, at = '2026-02-02T00:00:00Z', "
+            "tags = '{c}', meta = '{\"y\": 2}', name = NULL"
+        )
+        cur.execute("SELECT max(id) FROM auditlog WHERE operation = 'UPDATE'")
+        log_id = cur.fetchone()[0]
+        cur.execute(generate_revert_sql_from_log(conn, "auditlog", "typed", "1", log_id))
+        cur.execute("SELECT * FROM typed")
+        assert cur.fetchone() == before
+        cur.execute("DROP TABLE IF EXISTS typed CASCADE")

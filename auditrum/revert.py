@@ -59,6 +59,10 @@ def generate_revert_sql(
     All identifiers are validated and interpolated via :mod:`psycopg.sql`;
     ``record_id`` and ``log_id`` are bound as literals. The returned string is
     already properly quoted and safe to ``cursor.execute()`` without extra params.
+
+    The "before" values come from ``old_data`` when the row has a snapshot,
+    else from the ``old`` side of the paired ``diff``, and are cast to the
+    column types through ``jsonb_populate_record``.
     """
     validate_identifier(audit_table, "audit_table")
     validate_identifier(table_name, "table_name")
@@ -66,20 +70,18 @@ def generate_revert_sql(
         validate_identifier(col, "revert column")
 
     set_items = sql.SQL(", ").join(
-        sql.SQL(
-            "{col} = CASE WHEN audit_entry.old_data IS NOT NULL "
-            "THEN audit_entry.old_data->>{col_lit} "
-            "ELSE audit_entry.diff->{col_lit}->>'old' END"
-        ).format(col=sql.Identifier(col), col_lit=sql.Literal(col))
-        for col in columns
+        sql.SQL("{col} = r.{col}").format(col=sql.Identifier(col)) for col in columns
     )
 
     query = sql.SQL(
         "WITH audit_entry AS ("
-        "SELECT old_data, diff FROM {audit_table} "
+        "SELECT COALESCE(old_data, ("
+        "SELECT jsonb_object_agg(d.key, d.value->'old') FROM jsonb_each(diff) AS d"
+        ")) AS before FROM {audit_table} "
         "WHERE id = {log_id} AND table_name = {table_lit}"
         ") "
-        "UPDATE {table} SET {set_items} FROM audit_entry "
+        "UPDATE {table} SET {set_items} "
+        "FROM audit_entry, jsonb_populate_record(NULL::{table}, audit_entry.before) AS r "
         "WHERE {table}.id = {record_id};"
     ).format(
         audit_table=sql.Identifier(audit_table),

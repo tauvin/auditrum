@@ -44,9 +44,12 @@ class TestGenerateRevertSql:
 
     def test_values_fall_back_to_diff_old(self):
         sql = generate_revert_sql("auditlog", "users", "42", 7, ["name"])
-        assert "audit_entry.old_data IS NOT NULL" in sql
-        assert "audit_entry.diff->'name'->>'old'" in sql
-        assert "SELECT old_data, diff FROM" in sql
+        assert "COALESCE(old_data, (SELECT jsonb_object_agg(d.key, d.value->'old')" in sql
+
+    def test_values_are_cast_to_column_types(self):
+        sql = generate_revert_sql("auditlog", "users", "42", 7, ["name", "email"])
+        assert 'jsonb_populate_record(NULL::"users", audit_entry.before) AS r' in sql
+        assert '"name" = r."name", "email" = r."email"' in sql
 
     def test_record_id_is_quoted_and_escaped(self):
         # record_id with a quote must be safely escaped
