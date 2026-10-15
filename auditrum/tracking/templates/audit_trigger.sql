@@ -1,6 +1,5 @@
 CREATE OR REPLACE FUNCTION {function_name}() RETURNS trigger AS $$
 DECLARE
-    data JSONB;
     diff JSONB;
     ignored_keys TEXT[] := {ignored_keys_expr};
     old_filtered jsonb := to_jsonb(OLD);
@@ -40,12 +39,6 @@ BEGIN
         END IF;
     END IF;
 
-    IF (TG_OP = 'DELETE') THEN
-        data = to_jsonb(OLD);
-    ELSE
-        data = to_jsonb(NEW);
-    END IF;
-
     INSERT INTO {audit_table} (
         operation, changed_at, object_id, table_name,
         user_id, old_data, new_data, diff, context_id, meta
@@ -58,8 +51,8 @@ BEGIN
         END,
         TG_TABLE_NAME,
         _audit_current_user_id(),
-        CASE WHEN TG_OP IN ('UPDATE', 'DELETE') THEN old_filtered ELSE NULL END,
-        CASE WHEN TG_OP IN ('UPDATE', 'INSERT') THEN new_filtered ELSE NULL END,
+        {old_data_expr},
+        {new_data_expr},
         diff,
         _audit_attach_context(),
         {meta_expr}

@@ -30,6 +30,8 @@ class TestRender:
             ignored_keys_expr="ARRAY[]::text[]",
             log_conditions_block="",
             meta_expr="NULL",
+            old_data_expr="NULL::jsonb",
+            new_data_expr="NULL::jsonb",
         )
         assert "CREATE TRIGGER audit_x_trigger" in sql
         assert "ON x" in sql
@@ -44,6 +46,8 @@ class TestRender:
             ignored_keys_expr="ARRAY[]::text[]",
             log_conditions_block="",
             meta_expr="NULL",
+            old_data_expr="NULL::jsonb",
+            new_data_expr="NULL::jsonb",
             unused_extra="ok",
         )
         assert sql
@@ -172,3 +176,40 @@ class TestTrackSpec:
 
         with pytest.raises(FrozenInstanceError):
             a.table = "other"  # type: ignore[misc]
+
+
+class TestStorageMode:
+    def test_default_is_full(self):
+        assert TrackSpec(table="users").storage == "full"
+
+    def test_full_mode_writes_filtered_snapshots(self):
+        sql = TrackSpec(table="users").build().install_sql
+        assert "THEN old_filtered ELSE NULL END" in sql
+        assert "THEN new_filtered ELSE NULL END" in sql
+
+    def test_diff_mode_writes_null_snapshots(self):
+        sql = TrackSpec(table="users", storage="diff").build().install_sql
+        assert "old_filtered ELSE NULL END" not in sql
+        assert "new_filtered ELSE NULL END" not in sql
+        assert sql.count("NULL::jsonb") == 2
+
+    def test_storage_changes_checksum(self):
+        full = TrackSpec(table="users").build().checksum
+        diff = TrackSpec(table="users", storage="diff").build().checksum
+        assert full != diff
+
+    def test_storage_in_fingerprint(self):
+        assert TrackSpec(table="users").to_fingerprint()["storage"] == "full"
+        assert TrackSpec(table="users", storage="diff").to_fingerprint()["storage"] == "diff"
+
+    def test_invalid_storage_rejected(self):
+        with pytest.raises(ValueError, match="storage"):
+            TrackSpec(table="users", storage="snapshots")  # type: ignore[arg-type]
+
+    def test_diff_with_log_condition_rejected(self):
+        with pytest.raises(ValueError, match="log_condition"):
+            TrackSpec(table="users", storage="diff", log_condition="NEW.active")
+
+    def test_dead_data_variable_removed(self):
+        sql = TrackSpec(table="users").build().install_sql
+        assert "data JSONB;" not in sql
