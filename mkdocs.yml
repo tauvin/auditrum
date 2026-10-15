@@ -19,6 +19,7 @@ nav:
       - Django integration: django.md
       - SQLAlchemy integration: sqlalchemy.md
       - Time travel: time-travel.md
+      - Diff chain check: diff-chain.md
       - Hardening: hardening.md
       - Observability: observability.md
       - Production deployment: deployment.md
