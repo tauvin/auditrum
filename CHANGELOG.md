@@ -8,6 +8,8 @@ the API stabilises.
 
 ## [Unreleased]
 
+## [0.8.0] — 2026-10-15
+
 ### Added
 
 - **``verify-diff-chain``: find writes that bypassed the audit trigger.**
@@ -18,6 +20,11 @@ the API stabilises.
   row's existence. A windowed run (``--since``, default one day) suits a
   daily cron job; ``--full`` checks whole tables. Exit code 1 (or
   ``CommandError``) when anything is found. No migration needed.
+
+### Removed
+
+- The case-study pages from the documentation; their general findings
+  moved to the "Field observations" section of the performance page.
 
 ## [0.7.1] — 2026-10-15
 
@@ -1356,7 +1363,8 @@ Initial public release. Adds the Django integration, the Typer-based
 CLI, and the first cut of trigger-based audit logging on partitioned
 PostgreSQL tables.
 
-[Unreleased]: https://github.com/tauvin/auditrum/compare/v0.7.1...HEAD
+[Unreleased]: https://github.com/tauvin/auditrum/compare/v0.8.0...HEAD
+[0.8.0]: https://github.com/tauvin/auditrum/compare/v0.7.1...v0.8.0
 [0.7.1]: https://github.com/tauvin/auditrum/compare/v0.7.0...v0.7.1
 [0.7.0]: https://github.com/tauvin/auditrum/compare/v0.6.2...v0.7.0
 [0.6.2]: https://github.com/tauvin/auditrum/compare/v0.6.1...v0.6.2
