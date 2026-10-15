@@ -145,6 +145,15 @@ class TestReconstructRowDiffOnly:
         assert row_at(conn, switch) == {"id": 1, "name": "b", "secret": "s", "n": 1}
         assert row_at(conn, diff_era) == {"id": 1, "name": "b", "secret": "s", "n": 2}
 
+    def test_switch_back_to_full_keeps_live_state(self, items):
+        conn = items
+        install(conn, TrackSpec(table="items", storage="diff"))
+        with conn.cursor() as cur:
+            cur.execute("INSERT INTO items VALUES (1, 'a', 's', 1)")
+            cur.execute("UPDATE items SET name = 'b' WHERE id = 1")
+        install(conn, TrackSpec(table="items"))
+        assert row_at(conn, now(conn)) == {"id": 1, "name": "b", "secret": "s", "n": 1}
+
     def test_missing_registry_entry_raises(self, items):
         conn = items
         install(conn, TrackSpec(table="items", storage="diff"))

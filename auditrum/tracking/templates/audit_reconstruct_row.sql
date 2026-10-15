@@ -62,8 +62,13 @@ BEGIN
     END IF;
 
     v_spec := _audit_tracked_spec(p_table);
-    IF v_has_events AND v_spec IS NULL THEN
-        RAISE EXCEPTION 'auditrum: table % has diff-only audit rows but no entry in {tracking_table}', p_table;
+    IF v_has_events THEN
+        -- The latest event is diff-only, so the live row is the current state
+        -- whatever mode the table is in now.
+        IF v_spec IS NULL THEN
+            RAISE EXCEPTION 'auditrum: table % has diff-only audit rows but no entry in {tracking_table}', p_table;
+        END IF;
+        RETURN _audit_live_row(p_table, p_object_id, v_spec);
     END IF;
     IF v_spec IS NULL OR v_spec->>'storage' IS DISTINCT FROM 'diff' THEN
         RETURN NULL;

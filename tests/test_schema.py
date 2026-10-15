@@ -143,6 +143,11 @@ class TestGenerateAuditAttachContextSql:
         assert "EXCEPTION WHEN OTHERS THEN" in sql
         assert "RETURN NULL" in sql
 
+    def test_is_security_definer(self):
+        sql = generate_audit_attach_context_sql()
+        assert "SECURITY DEFINER" in sql
+        assert "SET search_path = pg_catalog, public" in sql
+
     def test_custom_gucs(self):
         sql = generate_audit_attach_context_sql(
             guc_id="myapp.ctx_id", guc_metadata="myapp.ctx_meta"
