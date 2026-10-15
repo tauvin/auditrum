@@ -432,7 +432,10 @@ def verify_diff_chain_cmd(
                         )
                     )
                 except Exception as e:
-                    log.error("Failed to verify the diff chain", table=name, error=str(e))
+                    if as_json:  # structlog prints to stdout; keep it pure JSON
+                        typer.echo(f"{name}: {e}", err=True)
+                    else:
+                        log.error("Failed to verify the diff chain", table=name, error=str(e))
                     conn.rollback()
                     failed.append(name)
     except Exception as e:

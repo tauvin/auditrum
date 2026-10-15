@@ -134,6 +134,19 @@ class TestVerifyDiffChainCommand:
         assert "broken" in result.output
         self.conn.rollback.assert_called_once()
 
+    def test_failing_table_keeps_json_stdout_valid(self):
+        def verify(conn, *, table, **kwargs):
+            if table == "broken":
+                raise RuntimeError("column t.id does not exist")
+            return [FINDING]
+
+        self.runner = CliRunner(mix_stderr=False)
+        result, _, _ = self._invoke(["--json"], tables=("broken", "items"), side_effect=verify)
+        assert result.exit_code == 2
+        [row] = json.loads(result.stdout)
+        assert row["object_id"] == "1"
+        assert "broken" in result.stderr and "column t.id does not exist" in result.stderr
+
     def test_empty_registry_exits_two(self):
         result, _, verify = self._invoke([], tables=())
         assert result.exit_code == 2
