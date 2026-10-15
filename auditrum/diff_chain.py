@@ -244,7 +244,9 @@ def verify_diff_chain(
                 f"table {table!r} has no readable entry in {_TRACKING_TABLE} "
                 "(not tracked through TriggerManager, or no SELECT on the registry)"
             )
-        if spec[0].get("log_condition") is not None:
+        # Django's connection hands jsonb over as str; psycopg already decodes it.
+        spec_data = json.loads(spec[0]) if isinstance(spec[0], str) else spec[0]
+        if spec_data.get("log_condition") is not None:
             raise ValueError(
                 f"table {table!r} uses log_condition; its audit chain has gaps by design "
                 "and cannot be verified"

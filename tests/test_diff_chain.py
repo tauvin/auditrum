@@ -43,6 +43,20 @@ class TestArguments:
             verify_diff_chain(conn, table="items", full=True)
         assert cur.execute.call_count == 1
 
+    def test_spec_as_json_text_is_decoded(self):
+        # Django's connection hands jsonb over as str, not dict.
+        conn, _ = _conn(
+            fetchone=('{"fields_kind": "all", "log_condition": null}',),
+            fetchall=[("1", 7, "live", "name", '"a"', '"X"', "live value of name differs")],
+        )
+        [finding] = verify_diff_chain(conn, table="items", full=True)
+        assert finding.kind == "live" and finding.actual == "X"
+
+    def test_log_condition_in_json_text_spec_is_refused(self):
+        conn, _ = _conn(fetchone=('{"fields_kind": "all", "log_condition": "NEW.n > 0"}',))
+        with pytest.raises(ValueError, match="items.*log_condition"):
+            verify_diff_chain(conn, table="items", full=True)
+
 
 class TestDecoding:
     def test_string_jsonb_values_are_decoded(self):
