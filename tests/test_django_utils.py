@@ -227,9 +227,55 @@ class TestRenderLogChanges:
         log.operation = "UPDATE"
         log.old_data = {"name": "old"}
         log.new_data = {"name": "new"}
+        log.diff = None
         for k, v in overrides.items():
             setattr(log, k, v)
         return log
+
+    def _render(self, log, value=("Name", "x")):
+        with (
+            patch("auditrum.integrations.django.utils.model_for_table", return_value=MagicMock()),
+            patch("auditrum.integrations.django.utils.resolve_field_value", return_value=value),
+        ):
+            return render_log_changes(log)
+
+    def test_insert_from_diff(self):
+        log = self._log(
+            operation="INSERT",
+            old_data=None,
+            new_data=None,
+            diff={"name": {"old": None, "new": "x"}},
+        )
+        out = self._render(log)
+        assert "Name" in out and "x" in out
+
+    def test_delete_from_diff(self):
+        log = self._log(
+            operation="DELETE",
+            old_data=None,
+            new_data=None,
+            diff={"name": {"old": "gone", "new": None}},
+        )
+        out = self._render(log, ("Name", "gone"))
+        assert "line-through" in out and "gone" in out
+
+    def test_update_from_diff(self):
+        log = self._log(
+            operation="UPDATE",
+            old_data=None,
+            new_data=None,
+            diff={"name": {"old": "old", "new": "new"}},
+        )
+        with (
+            patch("auditrum.integrations.django.utils.model_for_table", return_value=MagicMock()),
+            patch(
+                "auditrum.integrations.django.utils.resolve_field_value",
+                side_effect=lambda _m, k, v: (k.title(), v),
+            ),
+        ):
+            out = render_log_changes(log)
+        assert "old" in out and "new" in out
+        assert "No changes" not in out
 
     def test_unknown_table_returns_em_dash(self):
         # model_for_table returns None for tables that don't map to any
