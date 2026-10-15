@@ -106,10 +106,12 @@ class FieldFilter:
         if self.kind == "exclude":
             quoted = ", ".join(f"'{k}'" for k in self.fields)
             return f"ARRAY[{quoted}]::text[]"
-        # kind == "only" — invert: ignore everything not in the whitelist
+        # kind == "only" — invert: ignore everything not in the whitelist.
+        # NEW is NULL on DELETE, so fall back to OLD for the column list.
         keys_tuple = "(" + ", ".join(f"'{k}'" for k in self.fields) + ")"
         return (
-            "ARRAY(SELECT key FROM jsonb_object_keys(to_jsonb(NEW)) AS key(key) "
+            "ARRAY(SELECT key FROM jsonb_object_keys("
+            "COALESCE(to_jsonb(NEW), to_jsonb(OLD))) AS key(key) "
             f"WHERE key.key NOT IN {keys_tuple})::text[]"
         )
 

@@ -14,7 +14,9 @@ own numbers.
 ``@track(fields=[...])`` produces a trigger that only diffs the
 listed columns. ``@track(exclude=[...])`` is the mirror. Either
 shrinks ``old_filtered`` / ``new_filtered``, which shrinks
-``jsonb_diff`` cost, which shrinks INSERT time into ``auditlog``.
+``jsonb_diff`` cost, which shrinks INSERT time into ``auditlog``. The
+``old_data`` / ``new_data`` snapshots are written from the filtered rows
+too, so a narrower filter also means smaller audit rows.
 
 ```python
 # Before — diffs every column, including large/volatile ones

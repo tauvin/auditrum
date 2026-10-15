@@ -4,7 +4,8 @@ Reconstruct the state of any row — or any whole table — at any past
 timestamp, without PostgreSQL's `temporal_tables` extension and without
 per-model shadow tables. Because every audit event stores the full row
 snapshot in `old_data` / `new_data`, the "latest event at or before
-`t`" gives us back the entire state.
+`t`" gives us back the entire state — minus any columns outside the
+table's field filter, which are never written to the audit log.
 
 ## How it works
 

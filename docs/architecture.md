@@ -168,8 +168,8 @@ BEGIN
     ) VALUES (
         TG_OP, now(), NULL, TG_TABLE_NAME,
         _audit_current_user_id(),
-        CASE WHEN TG_OP IN ('UPDATE', 'DELETE') THEN to_jsonb(OLD) ELSE NULL END,
-        CASE WHEN TG_OP IN ('UPDATE', 'INSERT') THEN to_jsonb(NEW) ELSE NULL END,
+        CASE WHEN TG_OP IN ('UPDATE', 'DELETE') THEN old_filtered ELSE NULL END,
+        CASE WHEN TG_OP IN ('UPDATE', 'INSERT') THEN new_filtered ELSE NULL END,
         diff,      -- paired shape, written for every operation
         _audit_attach_context(),
         NULL
@@ -195,10 +195,12 @@ Notable decisions:
    keep it Python-generated rather than an extension is portability —
    works on any managed Postgres (RDS, Cloud SQL, etc.) without
    requiring `CREATE EXTENSION`.
-3. **`to_jsonb(OLD)` / `to_jsonb(NEW)` stores the full row**, not just
-   the filtered diff. This is what makes time travel work — the
+3. **`old_data` / `new_data` store the full filtered row**, not just
+   the changed columns. This is what makes time travel work — the
    reconstruct functions don't need the diff, they just take the most
-   recent `new_data`.
+   recent `new_data`. Columns outside the field filter are stripped from
+   the snapshots as well as from the diff, so an excluded column never
+   reaches the audit log.
 4. **`diff IS NULL` early return** for UPDATE. If the filtered `diff`
    is empty (every changed column was in `ignored_keys`), we skip the
    INSERT entirely. No rows in `auditlog`, no `audit_context` upsert.

@@ -110,6 +110,50 @@ class TestTriggerRoundtrip:
         assert "password" not in diff
         assert diff["email"] == {"old": "c@x.com", "new": "c2@x.com"}
 
+    def test_exclude_fields_filters_snapshots(self, sample_table):
+        """Regression: ``old_data`` / ``new_data`` were raw ``to_jsonb(OLD/NEW)``,
+        so excluded columns leaked into every snapshot."""
+        conn = sample_table
+        with conn.cursor() as cur:
+            cur.execute(generate_trigger_sql("users", exclude_fields=["password"]))
+            cur.execute(
+                "INSERT INTO users (name, email, password) VALUES ('c', 'c@x.com', 'secret')"
+            )
+            cur.execute("UPDATE users SET email = 'c2@x.com' WHERE name = 'c'")
+            cur.execute("DELETE FROM users WHERE name = 'c'")
+            cur.execute("SELECT operation, old_data, new_data FROM auditlog ORDER BY id")
+            rows = cur.fetchall()
+        assert [r[0] for r in rows] == ["INSERT", "UPDATE", "DELETE"]
+        for _, old_data, new_data in rows:
+            for snapshot in (old_data, new_data):
+                if snapshot is not None:
+                    assert "password" not in snapshot
+                    assert "email" in snapshot
+
+    def test_track_only_filters_delete(self, sample_table):
+        """Regression: the ``only`` whitelist was computed from ``NEW``, which
+        is NULL on DELETE, so DELETE rows carried every column."""
+        conn = sample_table
+        with conn.cursor() as cur:
+            cur.execute(generate_trigger_sql("users", track_only=["name"]))
+            cur.execute("INSERT INTO users (name, password) VALUES ('d', 'secret')")
+            cur.execute("DELETE FROM users WHERE name = 'd'")
+            cur.execute("SELECT diff, old_data FROM auditlog WHERE operation = 'DELETE'")
+            diff, old_data = cur.fetchone()
+        assert diff == {"name": {"old": "d", "new": None}}
+        assert old_data == {"name": "d"}
+
+    def test_track_only_filters_snapshots(self, sample_table):
+        conn = sample_table
+        with conn.cursor() as cur:
+            cur.execute(generate_trigger_sql("users", track_only=["name"]))
+            cur.execute("INSERT INTO users (name, password) VALUES ('e', 'secret')")
+            cur.execute("UPDATE users SET name = 'e2' WHERE name = 'e'")
+            cur.execute("SELECT old_data, new_data FROM auditlog WHERE operation = 'UPDATE'")
+            old_data, new_data = cur.fetchone()
+        assert old_data == {"name": "e"}
+        assert new_data == {"name": "e2"}
+
     def test_track_only_ignores_other_fields(self, sample_table):
         conn = sample_table
         with conn.cursor() as cur:

@@ -8,6 +8,23 @@ the API stabilises.
 
 ## [Unreleased]
 
+### Fixed
+
+- **``old_data`` / ``new_data`` honour the field filter.** The trigger
+  wrote raw ``to_jsonb(OLD)`` / ``to_jsonb(NEW)`` snapshots, so columns
+  listed in ``exclude`` (or left out of ``fields``) still landed in every
+  audit row — a leak for secrets kept out of the diff, and dead weight on
+  wide tables. Snapshots are now built from the same filtered rows as the
+  diff. With ``fields=[...]`` this also drops ``id`` from the snapshots;
+  the primary key stays available as ``object_id``. Existing rows are not
+  rewritten.
+- **``fields=[...]`` now filters DELETE events.** The whitelist was
+  computed from ``NEW``, which is NULL on DELETE, so DELETE rows carried
+  every column in both ``diff`` and ``old_data``.
+
+Both fixes change the trigger body: run ``auditrum_makemigrations`` and
+``migrate`` to reinstall the triggers.
+
 ## [0.6.1] — 2026-09-24
 
 ### Fixed

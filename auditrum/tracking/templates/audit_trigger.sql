@@ -58,8 +58,8 @@ BEGIN
         END,
         TG_TABLE_NAME,
         _audit_current_user_id(),
-        CASE WHEN TG_OP IN ('UPDATE', 'DELETE') THEN to_jsonb(OLD) ELSE NULL END,
-        CASE WHEN TG_OP IN ('UPDATE', 'INSERT') THEN to_jsonb(NEW) ELSE NULL END,
+        CASE WHEN TG_OP IN ('UPDATE', 'DELETE') THEN old_filtered ELSE NULL END,
+        CASE WHEN TG_OP IN ('UPDATE', 'INSERT') THEN new_filtered ELSE NULL END,
         diff,
         _audit_attach_context(),
         {meta_expr}
