@@ -36,6 +36,20 @@ class TestRevertRoundtrip:
             cur.execute("SELECT email FROM users WHERE id = %s", (user_id,))
             assert cur.fetchone()[0] == "a@old.com"
 
+    def test_revert_refuses_insert_event(self, users_with_trigger):
+        conn = users_with_trigger
+        with conn.cursor() as cur:
+            cur.execute(
+                "INSERT INTO users (name, email) VALUES ('alice', 'a@old.com') RETURNING id"
+            )
+            user_id = cur.fetchone()[0]
+            cur.execute("SELECT max(id) FROM auditlog WHERE operation = 'INSERT'")
+            log_id = cur.fetchone()[0]
+            with pytest.raises(ValueError, match="only UPDATE events can be reverted"):
+                generate_revert_sql_from_log(conn, "auditlog", "users", str(user_id), log_id)
+            cur.execute("SELECT name, email FROM users WHERE id = %s", (user_id,))
+            assert cur.fetchone() == ("alice", "a@old.com")
+
     def test_generate_revert_sql_injection_blocked(self):
         with pytest.raises(ValueError):
             generate_revert_sql("auditlog", "users; DROP", "1", 1, ["name"])
