@@ -151,6 +151,10 @@ write of the affected columns.
   starts its chain at its first event after the change; a column
   removed from the filter is no longer compared with the live row.
 - Rows created before tracking, with no events at all, are not findings.
+- Pre-0.4 rows whose `diff` holds only the new values are used as the
+  new value of each column they list. The 0.3 trigger stripped changes
+  that set a column to NULL from those diffs, so such a change is
+  missing from the log and can still produce a finding.
 - `TRUNCATE` shows up as `lifecycle` findings for every object whose
   last event is not a DELETE.
 - The caller needs `SELECT` on the audit table, the trigger registry

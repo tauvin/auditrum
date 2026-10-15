@@ -87,19 +87,26 @@ ev AS (
     FROM {audit} a JOIN scope sc ON sc.object_id = a.object_id
     WHERE a.table_name = %(table)s
 ),
-kv AS (
-    SELECT e.id, e.object_id, e.changed_at, d.key,
-           d.value -> 'old' AS old_v,
-           d.value -> 'new' AS new_v,
-           LAG(d.value -> 'new') OVER w AS prev_new,
-           LAG(e.id) OVER w AS prev_id,
-           row_number() OVER (PARTITION BY e.object_id, d.key ORDER BY e.id DESC) AS rn_desc,
-           c.col_type
+entries AS (
+    -- A paired entry is an object with exactly the keys old and new; anything
+    -- else is a pre-0.4 values-only entry that carries just the new value.
+    SELECT e.id, e.object_id, e.changed_at, d.key, d.value,
+           jsonb_typeof(d.value) = 'object' AND d.value ?& array['old', 'new']
+               AND (SELECT count(*) FROM jsonb_object_keys(d.value)) = 2 AS paired
     FROM ev e
     CROSS JOIN LATERAL jsonb_each(e.diff) AS d(key, value)
-    LEFT JOIN cols c ON c.key = d.key
-    WHERE jsonb_typeof(d.value) = 'object'
-    WINDOW w AS (PARTITION BY e.object_id, d.key ORDER BY e.id)
+),
+kv AS (
+    SELECT n.id, n.object_id, n.changed_at, n.key, n.paired,
+           CASE WHEN n.paired THEN n.value -> 'old' END AS old_v,
+           CASE WHEN n.paired THEN n.value -> 'new' ELSE n.value END AS new_v,
+           LAG(CASE WHEN n.paired THEN n.value -> 'new' ELSE n.value END) OVER w AS prev_new,
+           LAG(n.id) OVER w AS prev_id,
+           row_number() OVER (PARTITION BY n.object_id, n.key ORDER BY n.id DESC) AS rn_desc,
+           c.col_type
+    FROM entries n
+    LEFT JOIN cols c ON c.key = n.key
+    WINDOW w AS (PARTITION BY n.object_id, n.key ORDER BY n.id)
 ),
 mismatches AS (
     -- chain: old[k] differs from new[k] of the previous event touching k
@@ -108,7 +115,7 @@ mismatches AS (
            format('old value of %%s differs from event %%s', k.key, k.prev_id) AS detail,
            k.changed_at
     FROM kv k
-    WHERE k.prev_id IS NOT NULL
+    WHERE k.paired AND k.prev_id IS NOT NULL
       AND CASE WHEN k.col_type = 'timestamp with time zone'
                     AND jsonb_typeof(k.old_v) = 'string' AND jsonb_typeof(k.prev_new) = 'string'
                THEN (k.old_v #>> '{{}}')::timestamptz IS DISTINCT FROM (k.prev_new #>> '{{}}')::timestamptz

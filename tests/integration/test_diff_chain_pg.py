@@ -132,15 +132,41 @@ def test_excluded_column_bypass_is_ignored(items):
     assert verify_diff_chain(items, table="vc_items", full=True) == []
 
 
-def test_values_only_diff_rows_are_skipped(items):
-    tracked(items)
-    seed(items)
-    with items.cursor() as cur:
-        # A pre-0.4 style row in the middle of the history.
+def legacy_row(conn, object_id, diff):
+    """Insert a pre-0.4 style UPDATE row whose diff holds only the new values."""
+    with conn.cursor() as cur:
         cur.execute(
             "INSERT INTO auditlog (operation, changed_at, object_id, table_name, diff) "
-            "VALUES ('UPDATE', now(), '1', 'vc_items', '{\"name\": \"legacy\"}')"
+            "VALUES ('UPDATE', now(), %s, 'vc_items', %s::jsonb)",
+            (str(object_id), diff),
         )
+
+
+def test_values_only_rows_mid_history_feed_the_chain(items):
+    tracked(items)
+    seed(items)
+    # Object 1: the legacy row sits between two paired events.
+    bypass(items, "UPDATE vc_items SET name = 'L' WHERE id = 1")
+    legacy_row(items, 1, '{"name": "L"}')
+    with items.cursor() as cur:
+        cur.execute("UPDATE vc_items SET name = 'c' WHERE id = 1")
+    # Object 2: the legacy row is the last event touching name.
+    bypass(items, "UPDATE vc_items SET name = 'M' WHERE id = 2")
+    legacy_row(items, 2, '{"name": "M"}')
+    assert verify_diff_chain(items, table="vc_items", full=True) == []
+
+
+def test_jsonb_object_value_is_not_mistaken_for_a_paired_entry(items):
+    with items.cursor() as cur:
+        cur.execute("ALTER TABLE vc_items ADD COLUMN meta jsonb")
+    tracked(items)
+    with items.cursor() as cur:
+        cur.execute("""INSERT INTO vc_items VALUES (1, 'a', 's', 0, '{"a": 1}')""")
+        cur.execute("""UPDATE vc_items SET meta = '{"b": 2}' WHERE id = 1""")
+    bypass(items, """UPDATE vc_items SET meta = '{"c": 3}' WHERE id = 1""")
+    legacy_row(items, 1, '{"meta": {"c": 3}}')
+    with items.cursor() as cur:
+        cur.execute("""UPDATE vc_items SET meta = '{"d": 4}' WHERE id = 1""")
     assert verify_diff_chain(items, table="vc_items", full=True) == []
 
 
