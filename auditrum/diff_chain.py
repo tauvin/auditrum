@@ -155,7 +155,9 @@ SELECT DISTINCT ON (m.object_id)
        m.object_id, m.audit_id, m.kind, m.column_name, m.expected::text, m.actual::text, m.detail
 FROM mismatches m
 WHERE %(full)s OR %(since)s::timestamptz IS NULL OR m.changed_at IS NULL OR m.changed_at >= %(since)s
-ORDER BY m.object_id, m.audit_id, m.kind
+ORDER BY m.object_id, m.audit_id,
+         CASE m.kind WHEN 'lifecycle' THEN 0 WHEN 'chain' THEN 1 ELSE 2 END,
+         m.column_name
 LIMIT %(limit)s
 """
 
@@ -175,7 +177,13 @@ def parse_since(value: str) -> datetime:
     try:
         parsed = datetime.fromisoformat(value)
     except ValueError:
-        return datetime.now(UTC) - _parse_interval(value)
+        try:
+            return datetime.now(UTC) - _parse_interval(value)
+        except ValueError:
+            raise ValueError(
+                f"invalid --since value {value!r}: use e.g. '1 day', '2 weeks' "
+                "or an ISO-8601 timestamp"
+            ) from None
     if parsed.tzinfo is None:
         return parsed.replace(tzinfo=UTC)
     return parsed.astimezone(UTC)

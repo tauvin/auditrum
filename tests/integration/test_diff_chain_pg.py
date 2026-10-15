@@ -125,6 +125,17 @@ def test_bypassing_insert_after_delete_is_a_lifecycle_finding(items):
     assert "DELETE" in finding.detail
 
 
+def test_bypassing_delete_then_audited_insert_reads_as_lifecycle(items):
+    tracked(items)
+    seed(items)
+    bypass(items, "DELETE FROM vc_items WHERE id = 1")
+    with items.cursor() as cur:
+        cur.execute("INSERT INTO vc_items VALUES (1, 'r', 's', 0)")
+    [finding] = verify_diff_chain(items, table="vc_items", full=True)
+    assert (finding.object_id, finding.kind) == ("1", "lifecycle")
+    assert finding.detail == "INSERT for a row that already existed"
+
+
 def test_excluded_column_bypass_is_ignored(items):
     tracked(items)
     seed(items)

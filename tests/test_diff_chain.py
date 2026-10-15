@@ -82,5 +82,5 @@ class TestParseSince:
         assert parse_since("2026-10-01T12:00:00") == datetime(2026, 10, 1, 12, 0, tzinfo=UTC)
 
     def test_garbage(self):
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError, match="invalid --since value 'yesterday-ish'.*ISO-8601"):
             parse_since("yesterday-ish")

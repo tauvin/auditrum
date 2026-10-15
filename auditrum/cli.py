@@ -11,6 +11,7 @@ from dotenv import load_dotenv
 from psycopg import connect
 from psycopg import sql as psycopg_sql
 from rich import print as rich_print
+from rich.markup import escape
 
 from auditrum.blame import fetch_blame, format_blame
 from auditrum.diff_chain import list_registered_tables, parse_since, verify_diff_chain
@@ -451,9 +452,8 @@ def verify_diff_chain_cmd(
     elif findings:
         for f in findings:
             column = f" {f.column}" if f.column else ""
-            rich_print(
-                f"[red]{f.table}:{f.object_id} event {f.audit_id} {f.kind}{column}: {f.detail}[/red]"
-            )
+            line = f"{f.table}:{f.object_id} event {f.audit_id} {f.kind}{column}: {f.detail}"
+            rich_print(f"[red]{escape(line)}[/red]")
         rich_print(f"[red]{len(findings)} finding(s)[/red]")
     elif not failed:
         rich_print("[green]diff chain OK[/green]")

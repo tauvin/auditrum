@@ -71,8 +71,8 @@ it. `--full` ignores `--since`.
 Recommended schedule: windowed daily, full weekly.
 
 ```
-# daily, last day
-0 3 * * * auditrum verify-diff-chain
+# daily, last two days
+0 3 * * * auditrum verify-diff-chain --since '2 days'
 # weekly, everything
 0 4 * * 0 auditrum verify-diff-chain --full
 ```
@@ -80,9 +80,21 @@ Recommended schedule: windowed daily, full weekly.
 With Django:
 
 ```
-0 3 * * * cd /srv/app && python manage.py auditrum_verify_diff_chain
+0 3 * * * cd /srv/app && python manage.py auditrum_verify_diff_chain --since '2 days'
 0 4 * * 0 cd /srv/app && python manage.py auditrum_verify_diff_chain --full
 ```
+
+The daily job uses `--since '2 days'` so consecutive windows overlap:
+`changed_at` is the transaction start, so an event committed by a long
+transaction can carry a time before the previous run, and cron start
+times drift. With a one-day window such an event could fall between two
+runs.
+
+`chain` findings are historical: they keep appearing in every `--full`
+run, and there is no way to acknowledge one. Treat the full run as a
+periodic audit to read, not an alarm to page on: run it without
+alerting, or review its output by hand, and alert on the daily windowed
+run.
 
 Without `--table` every table registered for the audit table is checked;
 `--object-id` then applies to every one of them. If no table is
@@ -152,9 +164,12 @@ write of the affected columns.
 - A windowed run reads the whole history of every object it touches,
   because the previous event for a column can be arbitrarily old. This
   is the main cost on hot objects.
-- If the field filter changed over time, a column added to the filter
-  starts its chain at its first event after the change; a column
-  removed from the filter is no longer compared with the live row.
+- If the field filter changed over time: a column newly added to the
+  filter starts its chain at its first event after the change, and a
+  column removed from the filter is no longer compared with the live
+  row. A column that was in the filter, then excluded, then included
+  again is compared with the last value audited before the exclusion,
+  so any change made while it was excluded is reported as `chain`.
 - Tables tracked with a `log_condition` cannot be verified: events the
   condition skips are gaps by design. `verify_diff_chain` raises
   `ValueError` for them, and runs without `--table` leave them out.

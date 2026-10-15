@@ -1,3 +1,4 @@
+import dataclasses
 import json
 from unittest.mock import MagicMock, patch
 
@@ -81,6 +82,13 @@ class TestVerifyDiffChainCommand:
         result, _, _ = self._invoke([], findings=[FINDING])
         assert result.exit_code == 1
         assert "live value of name differs from event 7" in result.stdout
+
+    def test_human_output_escapes_markup(self):
+        finding = dataclasses.replace(FINDING, object_id="[bold]1[/bold]", detail="x [/red] y")
+        result, _, _ = self._invoke([], findings=[finding])
+        assert result.exit_code == 1
+        assert "items:[bold]1[/bold]" in result.output
+        assert "x [/red] y" in result.output
 
     def test_json_output(self):
         result, _, _ = self._invoke(["--json"], findings=[FINDING])
