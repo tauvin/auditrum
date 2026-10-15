@@ -1,7 +1,9 @@
+import uuid
 from collections.abc import Iterable
 from typing import TYPE_CHECKING, Any
 
 from django.contrib import admin
+from django.db.models import QuerySet
 from django.http import HttpRequest, HttpResponse
 from django.urls import NoReverseMatch, reverse
 from django.utils.html import format_html
@@ -147,6 +149,23 @@ class AuditLogAdmin(_LogAdminBase):
     # that made changelists with hundreds of events cancellable under
     # ASGI.
     resolve_linked_objects: bool = False
+
+    def get_search_results(
+        self, request: HttpRequest, queryset: QuerySet[AuditLog], search_term: str
+    ) -> tuple[QuerySet[AuditLog], bool]:
+        # Django 4.2 feeds every search term to ``context__id__exact`` and
+        # raises ``ValueError`` on anything that isn't a UUID; newer
+        # versions skip the invalid lookup. Fall back to ``object_id`` alone
+        # unless every term is a UUID.
+        terms = search_term.split()
+        try:
+            for term in terms:
+                uuid.UUID(term)
+        except ValueError:
+            for term in terms:
+                queryset = queryset.filter(object_id__icontains=term)
+            return queryset, False
+        return super().get_search_results(request, queryset, search_term)
 
     def changelist_view(
         self, request: HttpRequest, extra_context: dict[str, Any] | None = None

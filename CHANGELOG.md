@@ -21,6 +21,12 @@ the API stabilises.
 - **``fields=[...]`` now filters DELETE events.** The whitelist was
   computed from ``NEW``, which is NULL on DELETE, so DELETE rows carried
   every column in both ``diff`` and ``old_data``.
+- **Admin search no longer crashes on Django 4.2.** Any non-UUID search
+  term reached the ``context__id__exact`` lookup and raised ``ValueError``
+  (a 500 on the changelist). ``AuditLogAdmin`` now searches ``object_id``
+  alone unless every term is a UUID. The regression test called
+  ``ModelAdmin.get_search_results`` directly, bypassing the admin class,
+  and the integration suite was not running in CI.
 
 Both fixes change the trigger body: run ``auditrum_makemigrations`` and
 ``migrate`` to reinstall the triggers.

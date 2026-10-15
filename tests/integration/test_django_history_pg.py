@@ -152,8 +152,6 @@ def test_admin_search_by_context_id_does_not_crash(fresh_auditlog, configured_dj
     """
     from unittest.mock import MagicMock
 
-    from django.contrib.admin.options import ModelAdmin
-
     from auditrum.integrations.django.admin import AuditLogAdmin
     from auditrum.integrations.django.models import AuditLog
     from auditrum.triggers import generate_trigger_sql
@@ -181,15 +179,13 @@ def test_admin_search_by_context_id_does_not_crash(fresh_auditlog, configured_dj
     # Driving ``get_search_results`` with a UUID term. If the search
     # lookup still referenced ``context_id`` directly we'd crash with
     # FieldError here. Success = no exception + correct matching row.
-    qs, _ = ModelAdmin.get_search_results(admin_instance, request, AuditLog.objects.all(), ctx_uuid)
+    qs, _ = admin_instance.get_search_results(request, AuditLog.objects.all(), ctx_uuid)
     matched = list(qs.values_list("table_name", flat=True))
     assert "things" in matched
 
     # Non-UUID search term falls back to object_id icontains and must
     # not crash either.
-    qs, _ = ModelAdmin.get_search_results(
-        admin_instance, request, AuditLog.objects.all(), "not-a-uuid"
-    )
+    qs, _ = admin_instance.get_search_results(request, AuditLog.objects.all(), "not-a-uuid")
     list(qs)  # force evaluation — just assert no exception
 
 
