@@ -250,10 +250,6 @@ loader.
   suppresses updates leaves gaps in the history, so full tables may
   reconstruct a stale state. Diff storage cannot be combined with
   `log_condition` for exactly this reason.
-- **Bypassing writes break reconstruction.** Changes made with
-  `session_replication_role = replica`, a disabled trigger or `TRUNCATE`
-  are not in the audit log. Detect them with
-  [`verify-diff-chain`](diff-chain.md).
 - **Cost.** `reconstruct_row` is O(events after `at`) for the object.
   It reads the latest event with `ORDER BY id DESC`, which the
   `(table_name, object_id, changed_at DESC)` index cannot order, so a
@@ -281,6 +277,7 @@ loader.
   `session_replication_role = replica`, `ALTER TABLE ... DISABLE
   TRIGGER`, `TRUNCATE` and bulk loads that skip triggers leave no
   events, so a diff table reconstructs a wrong state around them.
+  Detect them with [`verify-diff-chain`](diff-chain.md).
 - **No PII masking on historical queries.** Time travel gives you
   back whatever was in the row at the time. If you need to comply with
   erasure requests, see the pseudonymization notes in
