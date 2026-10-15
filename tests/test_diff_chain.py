@@ -37,6 +37,12 @@ class TestArguments:
         with pytest.raises(ValueError, match="items.*auditrum_applied_triggers"):
             verify_diff_chain(conn, table="items", full=True)
 
+    def test_log_condition_table_is_refused(self):
+        conn, cur = _conn(fetchone=({"fields_kind": "all", "log_condition": "NEW.n > 0"},))
+        with pytest.raises(ValueError, match="items.*log_condition.*gaps by design"):
+            verify_diff_chain(conn, table="items", full=True)
+        assert cur.execute.call_count == 1
+
 
 class TestDecoding:
     def test_string_jsonb_values_are_decoded(self):

@@ -150,6 +150,9 @@ write of the affected columns.
 - If the field filter changed over time, a column added to the filter
   starts its chain at its first event after the change; a column
   removed from the filter is no longer compared with the live row.
+- Tables tracked with a `log_condition` cannot be verified: events the
+  condition skips are gaps by design. `verify_diff_chain` raises
+  `ValueError` for them, and runs without `--table` leave them out.
 - Rows created before tracking, with no events at all, are not findings.
 - Pre-0.4 rows whose `diff` holds only the new values are used as the
   new value of each column they list. The 0.3 trigger stripped changes

@@ -182,11 +182,15 @@ def parse_since(value: str) -> datetime:
 
 
 def list_registered_tables(conn: ConnectionProtocol, audit_table: str = "auditlog") -> list[str]:
-    """Tracked tables registered for ``audit_table`` in the trigger registry."""
+    """Tracked tables registered for ``audit_table`` in the trigger registry.
+
+    Tables with a ``log_condition`` are left out: their chain has gaps by design.
+    """
     validate_identifier(audit_table, "audit_table")
     query = sql.SQL(
         "SELECT DISTINCT table_name FROM {registry} "
-        "WHERE spec_fingerprint->>'audit_table' = %s ORDER BY table_name"
+        "WHERE spec_fingerprint->>'audit_table' = %s "
+        "AND spec_fingerprint->>'log_condition' IS NULL ORDER BY table_name"
     ).format(registry=sql.Identifier(_TRACKING_TABLE))
     with conn.cursor() as cur:
         cur.execute(query, (audit_table,))
@@ -231,6 +235,11 @@ def verify_diff_chain(
             raise ValueError(
                 f"table {table!r} has no readable entry in {_TRACKING_TABLE} "
                 "(not tracked through TriggerManager, or no SELECT on the registry)"
+            )
+        if spec[0].get("log_condition") is not None:
+            raise ValueError(
+                f"table {table!r} uses log_condition; its audit chain has gaps by design "
+                "and cannot be verified"
             )
         cur.execute(query, params)
         rows = cur.fetchall()

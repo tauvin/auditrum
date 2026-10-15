@@ -217,6 +217,19 @@ def test_list_registered_tables(items):
     assert list_registered_tables(items) == ["vc_items"]
 
 
+def test_list_registered_tables_skips_log_condition_tables(items):
+    tracked(items)
+    with items.cursor() as cur:
+        cur.execute("DROP TABLE IF EXISTS vc_cond CASCADE")
+        cur.execute("CREATE TABLE vc_cond (id int PRIMARY KEY, n int)")
+    try:
+        install(items, TrackSpec(table="vc_cond", storage="full", log_condition="NEW.n > 0"))
+        assert list_registered_tables(items) == ["vc_items"]
+    finally:
+        with items.cursor() as cur:
+            cur.execute("DROP TABLE IF EXISTS vc_cond CASCADE")
+
+
 @pytest.mark.parametrize("seed_value", range(5))
 def test_random_history_is_clean_until_one_bypass(items, seed_value):
     rnd = random.Random(seed_value)
