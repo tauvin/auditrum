@@ -1,4 +1,4 @@
--- Performance numbers for docs/performance.md + case-studies/catalog.md.
+-- Performance numbers for docs/performance.md.
 --
 -- Run on the production (or recently-restored staging) database after
 -- at least a few days of representative traffic. Usage:

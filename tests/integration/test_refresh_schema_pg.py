@@ -6,7 +6,7 @@ This is the test that should have existed before the 0.4 paired-
 diff change shipped. Without it, every release that modifies a
 ``generate_*_sql`` body silently fails to self-heal on upgrade —
 the initial migration emits the helpers once and nothing ever
-brings them forward. The user's catalog deployment hit this
+brings them forward. An early adopter's deployment hit this
 exact gap on 0.4.1: ``jsonb_diff`` stayed on the 0.3 values-only
 body, so new UPDATE audit rows were written in the old format
 despite the library being on 0.4.

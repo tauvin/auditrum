@@ -52,14 +52,14 @@ startup, PG `shared_buffers`, kernel scheduling, you name it).
 * **Concurrent write throughput** — the chain's advisory lock caps
   concurrent insert rate. The ceiling has to be measured under real
   multi-writer load; a single-process benchmark can't see it.
-  Catalog's production traffic is the planned data source.
+  Production traffic is the planned data source.
 * **Streaming memory footprint** — `reconstruct_table(stream=True)`
   is supposed to bound memory regardless of result set size.
   Measuring that needs `memray` or `tracemalloc` across a 10M-row
   audit log, not a per-op microbenchmark. Scheduled separately in
   `docs/performance.md`.
 * **Real-workload numbers** — the ones users quote at standups —
-  come from catalog pre-prod once those are available. The numbers
+  come from production deployments once those are available. The numbers
   in this repo are a baseline on a clean containerised Postgres,
   not a capacity planning tool.
 

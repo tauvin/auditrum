@@ -31,7 +31,7 @@ class TestGenerateAuditlogTableSql:
 
     def test_diff_gin_index_absent_by_default(self):
         """The diff GIN index is opt-in as of 0.4.6 (issue #6): 0 scans yet
-        700-860 MB/partition on two production deployments. Default off."""
+        hundreds of MB/partition in production. Default off."""
         sql = generate_auditlog_table_sql()
         assert "GIN (diff)" not in sql
         assert "diff_gin_idx" not in sql

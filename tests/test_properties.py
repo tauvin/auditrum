@@ -142,7 +142,7 @@ class TestTrackSpecChecksumStability:
         # Intentional — FieldFilter.fields is a tuple, not a set.
         # Documented by this test so a future "let's sort fields for the
         # user" refactor trips on purpose rather than silently
-        # invalidating every stored checksum in bidwise / catalog.
+        # invalidating every stored checksum in existing deployments.
         asc = sorted(fields)
         desc = list(reversed(asc))
         if asc == desc:

@@ -81,9 +81,9 @@ class AuditSettings:
     def diff_gin_index(self) -> bool:
         """Whether to create a GIN index on the audit log ``diff`` column.
 
-        Default ``False`` (issue #6): production measurements on two
-        independent deployments found this index gets 0 scans yet costs
-        700-860 MB per monthly partition and is re-maintained on every
+        Default ``False`` (issue #6): production observations found this
+        index gets 0 scans yet costs hundreds of MB per monthly partition
+        and is re-maintained on every
         audited write. It only pays off if the app runs ``WHERE diff @>
         '{...}'`` jsonb-containment queries against the audit log. Set to
         ``True`` only if you rely on such queries.

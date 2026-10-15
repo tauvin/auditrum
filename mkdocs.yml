@@ -33,9 +33,6 @@ nav:
       - Performance tuning: performance-tuning.md
       - Migration cookbook: migration-cookbook.md
       - Upgrade guide (0.x → 1.0): upgrading.md
-  - Case studies:
-      - Catalog: case-studies/catalog.md
-      - Bidwise: case-studies/bidwise.md
   - Contributing: contributing.md
   - Security: security.md
   - Changelog: changelog.md

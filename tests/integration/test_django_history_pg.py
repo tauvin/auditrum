@@ -190,7 +190,7 @@ def test_admin_search_by_context_id_does_not_crash(fresh_auditlog, configured_dj
 
 
 def test_insert_returning_inside_context_returns_real_id(fresh_auditlog, configured_django):
-    """Regression for the 0.4.2 UUID-pk bug reported by eridan-catalog.
+    """Regression for the 0.4.2 UUID-pk bug reported by an early adopter.
 
     The context wrapper prepends ``SELECT set_config(...);`` to every
     user statement, turning a single ``INSERT … RETURNING id`` into a
@@ -239,7 +239,7 @@ def test_insert_returning_inside_context_returns_real_id(fresh_auditlog, configu
     assert isinstance(row_id, int), (
         f"RETURNING id came back as {type(row_id).__name__}={row_id!r}; "
         "the set_config result leaked into the cursor's current result "
-        "set. This is the 0.4.2 eridan-catalog UUID-pk bug; fix "
+        "set. This is the 0.4.2 UUID-pk bug; fix "
         "regressed."
     )
     assert row_id > 0
@@ -256,7 +256,7 @@ def test_django_orm_create_inside_context_has_int_pk(fresh_auditlog, configured_
     ``cursor_debug_wrapper``-friendly interface.
 
     A followup ``.save()`` inside the same context confirms the pk
-    round-trip works — the original eridan-catalog report called
+    round-trip works — the original report called
     out ``instance.save()`` as the primary downstream failure mode
     because Django compiles ``UPDATE … WHERE id = int(pk)`` and
     ``int('d93aa383-9a53-4dd7-95be-ff3d1e4882eb')`` raises

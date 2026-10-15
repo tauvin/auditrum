@@ -30,7 +30,7 @@ def populated_history(fresh_auditlog):
     """Insert a row then UPDATE it ``N`` times to build a deep history.
 
     ``N = 100`` is enough to see the index working without making the
-    benchmark take forever. Real catalog rows see far more churn than
+    benchmark take forever. Real-world rows see far more churn than
     this; we'll bump this in docs once we see real numbers.
     """
     conn = fresh_auditlog

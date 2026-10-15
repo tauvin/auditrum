@@ -1,7 +1,7 @@
 # Contributing to auditrum
 
 Thank you for taking the time to look. auditrum is a small project —
-one maintainer plus a couple of sister-project integrators — and
+one maintainer plus a few early adopters — and
 every issue, PR, and bug report genuinely helps.
 
 ## What we happily accept

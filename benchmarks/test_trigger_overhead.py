@@ -8,14 +8,14 @@ Three axes we care about:
 
 1. **Operation** — INSERT / UPDATE / DELETE overhead.
 2. **Field filter** — ``FieldFilter.all()`` vs ``FieldFilter.only(…)``.
-   ``only`` is what most bidwise / catalog tables actually use; it
+   ``only`` is what most real-world tables actually use; it
    shrinks ``old_filtered`` / ``new_filtered`` so the diff step is
    cheaper.
 3. **log_condition** — short-circuit gate for "don't log drafts"
    patterns. Supposed to be near-zero cost when it short-circuits.
 
 Real numbers land in ``docs/performance.md`` once we run these
-against catalog's workload. What ships in the repo is the methodology
+against a production-like workload. What ships in the repo is the methodology
 — users can re-run on their own hardware and compare.
 """
 

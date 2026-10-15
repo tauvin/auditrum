@@ -276,7 +276,7 @@ def _inject_audit_context(
     # this means ``instance.pk`` ends up set to the context UUID
     # string rather than the ``bigint`` the database actually
     # generated — breaking ``.save()``, FK assignment, and every
-    # ``filter(pk=…)`` lookup downstream (eridan-catalog team hit
+    # ``filter(pk=…)`` lookup downstream (an early adopter hit
     # this in four separate code paths on 0.4.2).
     #
     # Advancing to the next result set via ``nextset()`` before

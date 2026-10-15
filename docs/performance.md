@@ -4,17 +4,12 @@ This page documents **how** we measure auditrum's performance and
 **what the numbers mean** — so a reader can either trust the
 published figures below or reproduce them on their own hardware.
 
-> **Two data sources.** The _Catalog pre-prod_ section reports numbers
-> measured against a live auditrum deployment (~7.2M audit events over
-> 37 days on PostgreSQL 17). The _Reference microbenchmark_ section is a
-> reproducible synthetic suite you can run on your own hardware. Catalog
-> is a **pre-prod** environment — its data churns realistically but it
-> does not carry full production user traffic, so its **throughput**
-> figures are a functional sample, not a production ceiling. The
-> microbench ran once on an Apple M3 Pro under Docker Desktop, whose
+> **Where the numbers come from.** The _Reference microbenchmark_
+> section is a reproducible synthetic suite you can run on your own
+> hardware. It ran once on an Apple M3 Pro under Docker Desktop, whose
 > macOS VM inflates absolute timings — **trust deltas over absolute µs**
-> there. Hash-chain numbers come only from the microbench (catalog runs
-> with the chain disabled).
+> there. Qualitative conclusions from real production use are in
+> _Field observations_.
 
 ## How we measure
 
@@ -49,104 +44,28 @@ uv run pytest benchmarks/ --benchmark-only \
     --benchmark-compare-fail=mean:20%
 ```
 
-## Catalog pre-prod (real workload)
+## Field observations
 
-Measured against catalog's live deployment: **PostgreSQL 17**, an
-``auditlog`` of **~7.23M events over 37 days** (2026-04-23 → 05-30),
-RANGE-partitioned by month, hash chain disabled. Two tracked tables:
-``catalog_sale`` (6.18M events, 88% UPDATE) and ``catalog_item``
-(1.06M, mixed incl. DELETE). Trigger figures come from
-``EXPLAIN (ANALYZE) … ROLLBACK`` (the ``Trigger`` line is the isolated
-audit cost); everything else from live introspection.
+Anonymised, qualitative conclusions from early production use. No
+absolute figures are published here — they depend too much on the
+workload to transfer.
 
-### Volume & storage footprint
-
-| Metric                | Value                                        |
-|-----------------------|----------------------------------------------|
-| Audit events          | 7.23M over 37 days                           |
-| ``auditlog`` total    | 25 GB (8.7 GB heap + **16 GB indexes**)      |
-| Per event             | ~3.7 KB (stores ``old_data`` + ``new_data`` + ``diff``, all jsonb) |
-| Busiest partition     | May 16 GB · Apr 9.3 GB (monthly partitions)  |
-| Throughput            | avg 2.3 events/s, peak ~3.7/s (pre-prod — not a prod ceiling) |
-
-### Trigger overhead (real schema, trigger-isolated)
-
-The marginal audit cost per write — ``jsonb_diff`` plus the INSERT into
-``auditlog`` (which maintains all six of its indexes, including the
-unused GIN below).
-
-| Operation | Table          | Trigger time |
-|-----------|----------------|--------------|
-| UPDATE    | ``catalog_sale`` | ~472 µs    |
-| UPDATE    | ``catalog_item`` | ~309 µs    |
-
-Representative single samples. ``catalog_sale`` is the more expensive
-of the two because its rows produce larger jsonb diffs. These dwarf the
-synthetic microbench delta (≈22 µs on a 3-column table) — real overhead
-is dominated by row width and by maintaining ``auditlog``'s indexes, not
-by the trigger logic itself.
-
-### Time-travel latency (real history)
-
-The deepest-history row in the dataset (a ``catalog_sale`` with **570
-revisions** — the max; p99 is only 25, p50 is 3) reconstructs its
-underlying index scan in **~4.9 ms**, worst case. Typical rows (3
-events) come back sub-millisecond. The composite
-``(table_name, object_id, changed_at DESC)`` index is used on **every
-partition** (a ``Merge Append`` across the monthly children), so depth
-scales the scan, not a sequential cliff.
-
-### Index footprint — a tuning finding
-
-Indexes are **16 GB against 8.7 GB of heap** (~1.8× the data). The
-biggest single offender is ``auditlog_diff_gin_idx`` — a GIN index on
-the ``diff`` jsonb that recorded **0 scans** yet costs **~704 MB on one
-month's partition** alone, and is re-maintained on *every* audited write
-(it is part of the trigger overhead above). The genuinely hot index is
-``context_id`` (the admin "events in this context" links, ~2.1k scans);
-the time-travel ``target`` index sees moderate use. **Takeaway:** if you
-never run ``WHERE diff @> …`` containment queries, the GIN-on-diff index
-is pure write tax and disk — drop it. (auditrum should consider making
-it opt-in — tracked in issue #6, confirmed unused on two deployments.)
-
-### Cross-check: bidwise (production)
-
-A second, independent auditrum deployment — **bidwise**, an active
-auction bidding platform — corroborates the catalog figures and the
-index finding, and adds the production throughput catalog (pre-prod)
-can't. PostgreSQL 17.5, ~3.84M events over 15 days, 8 tracked tables,
-monthly-partitioned, hash chain disabled.
-
-| Metric                    | Catalog (pre-prod)        | Bidwise (production)         |
-|---------------------------|---------------------------|------------------------------|
-| Events / span             | 7.2M / 37 d               | 3.84M / 15 d                 |
-| Peak rate                 | ~3.7 events/s             | **~49 events/s** (2,943/min) |
-| Footprint                 | 25 GB (~3.7 KB/event)     | 10 GB (~2.9 KB/event)        |
-| auditrum trigger (UPDATE) | ~0.31–0.47 ms             | ~1.38 ms                     |
-| Deepest history           | 570 rev → 4.9 ms          | 2,207 rev → 11.3 ms          |
-| GIN-on-diff index         | 0 scans, 704 MB/partition | 0 scans, 859 MB/partition    |
-
-What bidwise adds:
-
-- **Real production throughput.** Sustained bursts to ~49 events/s
-  (2,943 in the busiest minute) — the order of magnitude catalog's
-  pre-prod sample can't show.
-- **Deeper histories.** ``provider_invoice`` rows carry a median of
-  **119** revisions (p99 = 840); the deepest single row, a
-  ``provider_sale`` with **2,207** revisions, reconstructs its index
-  scan in **11.3 ms** — 4× catalog's deepest row for only 2.3× the time,
-  so the composite index scales sub-linearly with depth.
-- **Second GIN-on-diff confirmation.** Unused here too (0 scans,
-  859 MB on one partition) — see #6.
-
-One caveat on the overhead number: bidwise also runs a **legacy audit
-trigger** on the same tables (a ``*_audit_trigger`` left from a
-pre-auditrum in-house setup) that writes to a *separate*
-``common_auditlog`` table — so auditrum's ``auditlog`` figures above are
-clean, with no double-counting, but each write pays ~1.6–2 ms extra
-(~3 ms total). The ~1.38 ms above isolates auditrum's own trigger; it
-runs higher than catalog's mainly because the ``provider_*`` rows are
-wider.
+- **Trigger overhead scales with row width.** It is not a fixed
+  constant: wide rows produce larger ``jsonb`` diffs and cost more per
+  write, and the cost is dominated by row width and by maintaining
+  ``auditlog``'s indexes rather than by the trigger logic itself.
+- **Time-travel lookups stay fast.** Latency grows sub-linearly with
+  history depth thanks to the composite
+  ``(table_name, object_id, changed_at DESC)`` index, which is used on
+  every partition.
+- **The GIN index on ``diff`` is pure write tax unless you query it.**
+  It saw zero scans yet cost hundreds of MB per monthly partition, and
+  it is re-maintained on every audited write. That is why it became
+  opt-in (issue #6).
+- **A legacy audit trigger next to auditrum doubles the per-write audit
+  cost.** If you adopted auditrum on top of an in-house audit trigger,
+  remove the legacy one — see
+  [Recipe 5](migration-cookbook.md#recipe-5-removing-a-legacy-in-house-audit-trigger).
 
 ## Reference microbenchmark (reproduce anywhere)
 
@@ -154,9 +73,7 @@ The tables below are a synthetic suite you can run on any machine —
 single run here on an Apple M3 Pro, Docker Desktop, PostgreSQL
 16-alpine, Python 3.13, psycopg 3.3. Values are **medians** (robust
 against VM jitter). Cells marked **—** have no benchmark yet; rows
-sourced from load tests are called out as such. For the metrics catalog
-covers (overhead, time-travel, footprint) the section above is the
-authoritative real-world reference.
+sourced from load tests are called out as such.
 
 ### Trigger overhead (PG 16-alpine, Python 3.13, psycopg 3.3 — Apple M3 Pro / Docker Desktop)
 
@@ -175,7 +92,7 @@ the +31% as indicative only until a quieter / bare-metal rerun.
 Two honest caveats from this dataset: (1) ``FieldFilter.only(*2)``
 barely beats ``.all()`` on INSERT here because the benchmark table has
 only three columns — the filter saves little until the tracked row is
-wide (catalog's tables are). (2) The absolute baselines (e.g. DELETE
+wide. (2) The absolute baselines (e.g. DELETE
 at 363 µs) are inflated by Docker Desktop's macOS VM; on bare-metal
 Linux they drop substantially, but the *deltas* are what transfer.
 
@@ -191,14 +108,14 @@ entry, not a full trigger body execution.
 |-------------------------------------|-------------|--------------|
 | Audited, chain disabled             | 294 µs²     | ~3,400       |
 | Audited, chain enabled (uncontended)| 322 µs      | ~3,100       |
-| Audited, chain enabled, 4 writers   | — (catalog load test) | —  |
-| Audited, chain enabled, 16 writers  | — (catalog load test) | —  |
+| Audited, chain enabled, 4 writers   | — (load test) | —  |
+| Audited, chain enabled, 16 writers  | — (load test) | —  |
 
 ² The chain-disabled baseline was the noisiest run in the whole suite
 (stddev > median); the ~28 µs delta the advisory lock adds is the
 takeaway, not the absolute. ops/sec is derived from the median.
 
-The concurrency rows come from catalog load tests, not the
+The concurrency rows would come from load tests, not the
 microbenchmark suite — the single-writer number from
 ``benchmarks/`` is the floor, not the ceiling.
 
@@ -257,8 +174,7 @@ materialised peak scales with it.
 Reference hardware (Apple Silicon, Postgres 16-alpine in Docker,
 50k surviving rows, ``batch_size=1000``): ``tracemalloc`` peak
 **1.4 MB streaming vs 38.6 MB materialised** (ratio ≈ 0.04);
-``ru_maxrss`` delta **+3.7 MB vs +111.6 MB**. The catalog-scale run
-(~7M events) is still the next real number to land here.
+``ru_maxrss`` delta **+3.7 MB vs +111.6 MB**. A run at production scale is still the next real number to land here.
 
 ## CI matrix
 
@@ -305,6 +221,6 @@ Once auditrum is live:
   ``--benchmark-warmup=on`` is enabled by default and helps, but
   containerised Postgres on an unrelated-workload machine can still
   produce noisy runs.
-* **Catalog's numbers are one workload.** Catalog is
-  write-heavy and bursty; a read-heavy workload will show different
-  tracings. Don't assume catalog's numbers transfer linearly.
+* **Numbers are one workload.** A write-heavy, bursty workload and a
+  read-heavy one will show different tracings. Don't assume the
+  published numbers transfer linearly.
