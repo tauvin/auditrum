@@ -175,10 +175,14 @@ change what they can read.
 caller. A role that calls them needs `SELECT` on the audit table and,
 for tables that have diff-only rows, on `auditrum_applied_triggers` and
 on the tracked table itself (the live row is part of the answer). A
-role without `SELECT` on the tracked table gets a permission error, and
-one without `SELECT` on the registry gets an error for those tables,
-instead of a partial result. Without `SELECT` on the registry, full
-tables still work.
+role without `SELECT` on the tracked table gets a permission error.
+Without `SELECT` on the registry the functions cannot tell a diff table
+from a full one: full tables still work, objects whose history needs
+the live row raise an error, but rows of a diff table that have no
+audit events at all (created before tracking was enabled) are silently
+missing — `reconstruct_row` returns `NULL` for them and
+`reconstruct_table` leaves them out. Grant `SELECT` on the registry to
+every role that reads diff-table history.
 
 ## Hash chain for tamper detection
 

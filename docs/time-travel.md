@@ -265,8 +265,12 @@ loader.
   `reconstruct_table` only while the table is in diff mode.
 - **Privileges and errors.** `_audit_reconstruct_table` raises when
   diff-only rows exist but the table has no readable registry entry.
-  `_audit_reconstruct_row` raises only when the requested row needs the
-  live table.
+  `_audit_reconstruct_row` raises only when the requested row has
+  diff-only events and needs the live table. Rows of a diff table with
+  no events at all depend on the registry to be recognised: without a
+  readable entry they come back as `NULL` (and are left out of
+  `reconstruct_table`) instead of raising. See
+  [Time-travel privileges](hardening.md#time-travel-privileges).
 - **The reconstructable window is the retained window.** Once a
   partition is dropped, states inside it can no longer be rebuilt.
 - **Writes that bypass the trigger break diff reconstruction silently.**

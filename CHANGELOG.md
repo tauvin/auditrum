@@ -44,9 +44,11 @@ the API stabilises.
 you run ``auditrum_makemigrations`` and ``migrate``; that writes one refresh
 migration per app with tracked models. Migration
 ``0006_refresh_reconstruct_07`` installs the new reconstruct functions.
-Reading the history of diff tables needs ``SELECT`` on the tracked table
-and on ``auditrum_applied_triggers`` for the role that calls time travel;
-full tables need only ``SELECT`` on the audit table. The reconstruct
+Reading the history of tables that have diff-only rows needs ``SELECT`` on
+the tracked table and on ``auditrum_applied_triggers`` for the role that
+calls time travel; full tables need only ``SELECT`` on the audit table.
+Without the registry grant, rows of a diff table that have no audit events
+come back as ``NULL`` instead of raising. The reconstruct
 functions no longer pin ``search_path``: they resolve the audit table, the
 registry and the helpers through the caller's ``search_path``.
 
