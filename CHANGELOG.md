@@ -8,6 +8,20 @@ the API stabilises.
 
 ## [Unreleased]
 
+### Fixed
+
+- **SQLAlchemy ``bootstrap_schema`` and ``sync`` work again.**
+  ``bootstrap_schema`` split the generated SQL on ``";\n"``, which cut every
+  PL/pgSQL function body apart and failed on the first helper; each block
+  now goes to the driver whole. ``sync`` failed on the trigger registry
+  upsert because ``%s::jsonb`` became ``:p0::jsonb``, which SQLAlchemy does
+  not treat as a bind parameter. An integration test now runs the whole
+  SQLAlchemy path against Postgres.
+- **Revert works on non-text columns.** The revert ``UPDATE`` assigned
+  ``old_data->>'col'`` (text) to every column, so any event that touched an
+  integer, boolean, timestamp, array or jsonb column failed with a type
+  mismatch. Values are now cast with ``jsonb_populate_record``.
+
 ## [0.7.0] — 2026-10-15
 
 ### Added

@@ -103,6 +103,14 @@ class TestSQLAlchemyCursorTranslation:
         # The bind params dict is the second positional argument
         assert args[1] == {"p0": "alpha", "p1": 7}
 
+    def test_placeholder_before_cast_is_parenthesised(self):
+        conn = MagicMock()
+        cur = _SQLAlchemyCursor(conn)
+        cur.execute("INSERT INTO t VALUES (%s, %s::jsonb)", ("a", "{}"))
+        args, _ = conn.execute.call_args
+        assert "(:p0, (:p1)::jsonb)" in str(args[0])
+        assert args[0].compile().params == {"p0": None, "p1": None}
+
     def test_dict_params_pass_through(self):
         conn = MagicMock()
         cur = _SQLAlchemyCursor(conn)

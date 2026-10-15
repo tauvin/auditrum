@@ -72,7 +72,12 @@ class _SQLAlchemyCursor:
         while i < len(sql):
             if sql[i : i + 2] == "%s":
                 name = f"p{param_idx}"
-                out_sql.append(f":{name}")
+                # text() does not see ":p0" as a bind when "::type" follows,
+                # so wrap it: "(:p0)::jsonb".
+                if sql[i + 2 : i + 4] == "::":
+                    out_sql.append(f"(:{name})")
+                else:
+                    out_sql.append(f":{name}")
                 bind_params[name] = seq[param_idx]
                 param_idx += 1
                 i += 2
@@ -198,8 +203,6 @@ def bootstrap_schema(
     700-860 MB per monthly partition. Set ``True`` only if you query the
     audit log with ``WHERE diff @> '{...}'``.
     """
-    from sqlalchemy import text
-
     parts = [
         generate_audit_context_table_sql(context_table),
         generate_auditlog_table_sql(audit_table, diff_gin_index=diff_gin_index),
@@ -209,15 +212,16 @@ def bootstrap_schema(
         generate_audit_reconstruct_sql(audit_table),
         generate_auditlog_partitions_sql(audit_table, months_ahead=months_ahead),
     ]
-    full_sql = "\n\n".join(
-        p.rstrip(";") + ";" if not p.rstrip().endswith(";") else p for p in parts
-    )
-
+    # Each block goes to the driver whole: splitting on ";" breaks PL/pgSQL
+    # bodies, and text() / exec_driver_sql would parse ":name" and "%I" in
+    # them as bind parameters.
     with engine.begin() as conn:
-        for statement in full_sql.split(";\n"):
-            stmt = statement.strip()
-            if stmt:
-                conn.execute(text(stmt))
+        cursor = conn.connection.cursor()
+        try:
+            for part in parts:
+                cursor.execute(part)
+        finally:
+            cursor.close()
 
 
 def sync(
