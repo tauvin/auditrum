@@ -202,6 +202,9 @@ Full field reference for `BlameEntry`:
 | `change_reason`   | `str \| None`             | Extracted from `context_metadata["change_reason"]`               |
 | `diff`            | `dict \| None`            | For UPDATEs: only the columns that actually changed              |
 
+For diff-only rows, `old_value` / `new_value` without `field` contain
+only the changed columns.
+
 ## What's next
 
 - [Time travel](time-travel.md) — when you need the full row state at

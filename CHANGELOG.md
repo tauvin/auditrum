@@ -8,6 +8,50 @@ the API stabilises.
 
 ## [Unreleased]
 
+### Added
+
+- **Diff-only storage mode.** ``TrackSpec(storage="diff")`` /
+  ``@track(storage="diff")`` / ``track_table(..., storage="diff")`` stops
+  writing ``old_data`` / ``new_data``; the paired ``diff`` becomes the only
+  copy of each change. Time travel, field history, blame, revert and the
+  admin read the diff, and a table can switch modes without touching old
+  rows. Not combinable with ``log_condition``. Run
+  ``auditrum_makemigrations`` after switching.
+
+### Changed
+
+- **``_audit_reconstruct_row`` / ``_audit_reconstruct_table`` are
+  ``SECURITY INVOKER``.** The caller needs ``SELECT`` on the audit table
+  and, for tables that have diff-only rows, on the tracked table and
+  ``auditrum_applied_triggers``. Migration ``0006`` installs the new
+  bodies.
+- **Reconstruction orders by ``id``, not ``changed_at``.** ``changed_at``
+  is the transaction start, so a transaction that started earlier but
+  wrote later used to be treated as the earlier change. Field history and
+  blame order by ``id`` too.
+- **Revert only touches the columns the event changed.** Reverting an old
+  event no longer rolls back later changes to other columns. For rows
+  written by 0.3 (values-only ``diff`` with NULL-setting changes
+  stripped), a revert does not restore a column that event set to NULL.
+- For diff tables, ``reconstruct_table`` includes rows that existed before
+  tracking was enabled.
+- Blame without ``field`` returns only the changed columns in
+  ``old_value`` / ``new_value`` for diff-only rows; full rows keep whole
+  snapshots.
+
+**Upgrading.** The trigger body changed (a dead variable was removed), so
+``auditrum.W001`` fires and ``auditrum_makemigrations --check`` fails until
+you run ``auditrum_makemigrations`` and ``migrate``; that writes one refresh
+migration per app with tracked models. Migration
+``0006_refresh_reconstruct_07`` installs the new reconstruct functions.
+Reading the history of tables that have diff-only rows needs ``SELECT`` on
+the tracked table and on ``auditrum_applied_triggers`` for the role that
+calls time travel; full tables need only ``SELECT`` on the audit table.
+Without the registry grant, rows of a diff table that have no audit events
+come back as ``NULL`` instead of raising. The reconstruct
+functions no longer pin ``search_path``: they resolve the audit table, the
+registry and the helpers through the caller's ``search_path``.
+
 ## [0.6.2] — 2026-10-15
 
 ### Fixed

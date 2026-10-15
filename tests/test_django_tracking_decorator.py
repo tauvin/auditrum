@@ -48,6 +48,18 @@ def _reset_registry():
 
 
 class TestTrackDecorator:
+    def test_storage_is_passed_to_spec(self):
+        from django.db import models
+
+        @track(storage="diff")
+        class Event2(models.Model):
+            name = models.CharField(max_length=32)
+
+            class Meta:
+                app_label = "tests"
+
+        assert Event2.audit_spec.storage == "diff"
+
     def test_registers_spec_on_class(self):
         from django.db import models
 

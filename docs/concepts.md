@@ -83,6 +83,35 @@ Three mutually-exclusive modes for the field filter:
 | `FieldFilter.only(*names)`   | whitelist — diff only these                |
 | `FieldFilter.exclude(*names)`| blacklist — diff everything except these   |
 
+### Storage mode
+
+`storage` controls what each audit row keeps, independent of the field
+filter:
+
+| Mode             | `old_data` / `new_data`        | `diff`                       |
+|------------------|--------------------------------|------------------------------|
+| `"full"` (default)| filtered snapshots of the row | `{field: {old, new}}`        |
+| `"diff"`         | `NULL`                         | `{field: {old, new}}`, the only copy of the change |
+
+```python
+TrackSpec(table="orders", storage="diff")
+
+@track(storage="diff")            # Django
+track_table(orders, storage="diff")  # SQLAlchemy
+```
+
+In diff mode time travel, field history, blame, revert and the admin
+read the `diff`; INSERT and DELETE rows still carry every column,
+wrapped as `{old: null, new: v}` / `{old: v, new: null}`. Diff storage
+cannot be combined with `log_condition` (`ValueError` at construction):
+a skipped event would leave a gap that reconstruction cannot see.
+
+Switching a table between modes changes the trigger body, so run
+`auditrum_makemigrations` and `migrate` as for any spec change; old rows
+are left untouched. See
+[Switching a table to diff storage](migration-cookbook.md#switching-a-table-to-diff-storage)
+and [Performance tuning](performance-tuning.md#11-switch-hot-tables-to-diff-storage).
+
 Identifiers (`table`, `audit_table`, `fields`, `extra_meta_fields`) are
 validated against `^[A-Za-z_][A-Za-z0-9_]*$` in `__post_init__`, so
 SQL-injection through user-supplied names fails at **construction**

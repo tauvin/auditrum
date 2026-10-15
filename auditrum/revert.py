@@ -15,16 +15,33 @@ def get_revert_columns_from_log(
 ) -> list[str]:
     """Return the column names that should be restored when reverting a log entry.
 
+    These are the columns the event changed (the keys of its ``diff``), so
+    later changes to other columns survive the revert. Only UPDATE events
+    can be reverted: an INSERT or DELETE diff has no "before" values for
+    the live row, so anything else raises :class:`ValueError`.
+
     Skips ``id`` because the primary key is invariant — the revert is
     keyed *by* it, restoring it would be a no-op at best and a type
     mismatch at worst (jsonb ``->>`` always returns ``text``, but most
     primary keys are ``integer`` or ``bigint``).
     """
     validate_identifier(audit_table, "audit_table")
-    query = sql.SQL("SELECT jsonb_object_keys(old_data) FROM {} WHERE id = %s").format(
+    operation_query = sql.SQL("SELECT operation FROM {} WHERE id = %s").format(
+        sql.Identifier(audit_table)
+    )
+    query = sql.SQL("SELECT jsonb_object_keys(diff) FROM {} WHERE id = %s").format(
         sql.Identifier(audit_table)
     )
     with conn.cursor() as cur:
+        cur.execute(operation_query, (int(log_id),))
+        row = cur.fetchone()
+        if row is None:
+            raise ValueError(f"audit log entry {log_id} not found")
+        operation = row[0]
+        if operation != "UPDATE":
+            raise ValueError(
+                f"only UPDATE events can be reverted, log entry {log_id} is {operation}"
+            )
         cur.execute(query, (int(log_id),))
         keys = cur.fetchall()
     return [row[0] for row in keys if row[0] != "id"]
@@ -49,16 +66,17 @@ def generate_revert_sql(
         validate_identifier(col, "revert column")
 
     set_items = sql.SQL(", ").join(
-        sql.SQL("{col} = audit_entry.old_data->>{col_lit}").format(
-            col=sql.Identifier(col),
-            col_lit=sql.Literal(col),
-        )
+        sql.SQL(
+            "{col} = CASE WHEN audit_entry.old_data IS NOT NULL "
+            "THEN audit_entry.old_data->>{col_lit} "
+            "ELSE audit_entry.diff->{col_lit}->>'old' END"
+        ).format(col=sql.Identifier(col), col_lit=sql.Literal(col))
         for col in columns
     )
 
     query = sql.SQL(
         "WITH audit_entry AS ("
-        "SELECT old_data FROM {audit_table} "
+        "SELECT old_data, diff FROM {audit_table} "
         "WHERE id = {log_id} AND table_name = {table_lit}"
         ") "
         "UPDATE {table} SET {set_items} FROM audit_entry "

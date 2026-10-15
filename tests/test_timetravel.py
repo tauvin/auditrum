@@ -164,3 +164,43 @@ class TestReconstructFieldHistory:
         conn = _conn(_cursor([]))
         with pytest.raises(ValueError, match="Invalid"):
             reconstruct_field_history(conn, table="users", object_id="42", field="email; DROP")
+
+    def test_diff_only_rows(self):
+        rows = [
+            (
+                datetime(2024, 1, 1, tzinfo=UTC),
+                "INSERT",
+                None,
+                None,
+                {"email": {"old": None, "new": "a@x.com"}, "name": {"old": None, "new": "a"}},
+            ),
+            (
+                datetime(2024, 1, 2, tzinfo=UTC),
+                "UPDATE",
+                None,
+                None,
+                {"email": {"old": "a@x.com", "new": "b@x.com"}},
+            ),
+            (
+                datetime(2024, 1, 3, tzinfo=UTC),
+                "UPDATE",
+                None,
+                None,
+                {"name": {"old": "a", "new": "b"}},
+            ),
+            (
+                datetime(2024, 1, 4, tzinfo=UTC),
+                "DELETE",
+                None,
+                None,
+                {"email": {"old": "b@x.com", "new": None}},
+            ),
+        ]
+        conn = _conn(_cursor(rows))
+        history = reconstruct_field_history(conn, table="users", object_id="1", field="email")
+        assert [v for _, v in history] == ["a@x.com", "b@x.com", None]
+
+    def test_orders_by_id(self):
+        cur = _cursor([])
+        reconstruct_field_history(_conn(cur), table="users", object_id="1", field="email")
+        assert "ORDER BY id ASC" in str(cur.execute.call_args[0][0])

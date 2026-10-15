@@ -234,6 +234,40 @@ the context manually with ``is_local=false`` — audit the call
 sites of ``set_config(..., false)`` and switch to the middleware
 or ``auditrum_context(...)`` block.
 
+## 11. Switch hot tables to diff storage
+
+On an UPDATE-heavy table most of each audit row is the pair of
+``old_data`` / ``new_data`` snapshots, which repeat what ``diff``
+already says. ``storage="diff"`` stops writing them (see
+[Storage mode](concepts.md#storage-mode)):
+
+```python
+@track(storage="diff")
+class Order(models.Model): ...
+```
+
+Measured with ``benchmarks/test_storage_mode.py`` on a synthetic table
+with 12 data columns, 200 rows and 20 UPDATEs per row touching 2
+columns (PostgreSQL 16 in testcontainers):
+
+| Mode   | Avg INSERT row | Avg UPDATE row | ``reconstruct_row`` as of now |
+|--------|---------------:|---------------:|------------------------------:|
+| full   | 1785 B         | 1521 B         | 259 µs                        |
+| diff   | 1107 B         | 164 B          | 347 µs                        |
+
+UPDATE rows shrink by roughly an order of magnitude when few columns
+change. INSERT rows shrink much less because the INSERT diff wraps every
+column as ``{old: null, new: v}``. Numbers depend on column count and
+width; run the benchmark against a table shaped like yours.
+
+The latency column covers only the "current state" path (the live-row
+path). Reconstruction further back walks the events after the target
+time, and ``reconstruct_table`` reads every event of the table (and
+scans the live table in diff mode); see
+[Semantics and limits](time-travel.md#semantics-and-limits). Pick diff
+storage for tables where audit volume matters more than deep time
+travel latency.
+
 ## When the levers aren't enough
 
 If after running through this list you're still too slow:

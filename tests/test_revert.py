@@ -1,6 +1,35 @@
+from unittest.mock import MagicMock
+
 import pytest
 
-from auditrum.revert import generate_revert_sql
+from auditrum.revert import generate_revert_sql, get_revert_columns_from_log
+
+
+def _conn_returning(operation_row):
+    cursor = MagicMock()
+    cursor.fetchone.return_value = operation_row
+    cursor.fetchall.return_value = [("name",), ("email",)]
+    cursor.__enter__ = MagicMock(return_value=cursor)
+    cursor.__exit__ = MagicMock(return_value=False)
+    conn = MagicMock()
+    conn.cursor.return_value = cursor
+    return conn
+
+
+class TestGetRevertColumnsFromLog:
+    def test_returns_diff_keys_for_update(self):
+        conn = _conn_returning(("UPDATE",))
+        assert get_revert_columns_from_log(conn, "auditlog", 7) == ["name", "email"]
+
+    def test_rejects_insert(self):
+        conn = _conn_returning(("INSERT",))
+        with pytest.raises(ValueError, match="only UPDATE events can be reverted"):
+            get_revert_columns_from_log(conn, "auditlog", 7)
+
+    def test_rejects_missing_entry(self):
+        conn = _conn_returning(None)
+        with pytest.raises(ValueError, match="audit log entry 7 not found"):
+            get_revert_columns_from_log(conn, "auditlog", 7)
 
 
 class TestGenerateRevertSql:
@@ -12,6 +41,12 @@ class TestGenerateRevertSql:
         assert '"email"' in sql
         assert "'42'" in sql
         assert "WHERE id = 7" in sql
+
+    def test_values_fall_back_to_diff_old(self):
+        sql = generate_revert_sql("auditlog", "users", "42", 7, ["name"])
+        assert "audit_entry.old_data IS NOT NULL" in sql
+        assert "audit_entry.diff->'name'->>'old'" in sql
+        assert "SELECT old_data, diff FROM" in sql
 
     def test_record_id_is_quoted_and_escaped(self):
         # record_id with a quote must be safely escaped

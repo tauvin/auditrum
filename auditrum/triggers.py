@@ -107,7 +107,6 @@ def build_trigger_spec(
     # the template no longer exposes these as structured data, so we rebuild a
     # minimal view here for callers that still want it.
     declare: tuple[tuple[str, str], ...] = (
-        ("data", "JSONB"),
         ("diff", "JSONB"),
         ("ignored_keys", f"TEXT[] := {spec.fields.to_ignored_keys_expr()}"),
         ("old_filtered", "jsonb := to_jsonb(OLD)"),

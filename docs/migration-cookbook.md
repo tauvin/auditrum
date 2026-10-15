@@ -460,6 +460,97 @@ A note on partitioning: this is unrelated to auditrum's partitioned
 there's no parent/partition trigger-propagation subtlety to worry
 about here.
 
+## Switching a table to diff storage
+
+To stop writing `old_data` / `new_data` for a table (see
+[Storage mode](concepts.md#storage-mode)), set `storage="diff"` on its
+spec and apply the change like any other trigger change:
+
+```python
+@track(storage="diff")
+class Order(models.Model): ...
+```
+
+```bash
+python manage.py auditrum_makemigrations
+python manage.py migrate
+```
+
+Rows already in `auditlog` keep their snapshots. Reconstruction decides
+per row, so a history that starts as `full` and continues as `diff`
+reads correctly; see [Time travel](time-travel.md#how-it-works). The
+switch is reversible the same way. It cannot be combined with
+`log_condition`.
+
+## Shrinking old partitions
+
+Switching modes does not rewrite existing rows. To reclaim the space of
+old snapshots for the diff tables, copy a month partition without
+`old_data` / `new_data`. The example assumes a partition `p` that no
+writer touches any more; do it inside a maintenance window.
+
+```sql
+BEGIN;
+
+CREATE TABLE p_new (LIKE p INCLUDING ALL);
+
+-- Rows of diff tables with a paired diff: drop the snapshots, keep
+-- everything else (including id: reconstruction orders by it).
+INSERT INTO p_new (id, operation, changed_at, object_id, table_name, user_id,
+                   old_data, new_data, diff, context_id, meta)
+SELECT id, operation, changed_at, object_id, table_name, user_id,
+       NULL, NULL, diff, context_id, meta
+FROM p
+WHERE table_name IN ('orders', 'invoices')   -- your diff tables
+  AND diff IS NOT NULL
+  AND NOT EXISTS (
+      SELECT 1 FROM jsonb_each(diff) e
+      WHERE jsonb_typeof(e.value) <> 'object'
+         OR NOT (e.value ? 'old' AND e.value ? 'new')
+  );
+
+-- Every other row, untouched: exactly the complement of the predicate above.
+INSERT INTO p_new (id, operation, changed_at, object_id, table_name, user_id,
+                   old_data, new_data, diff, context_id, meta)
+SELECT id, operation, changed_at, object_id, table_name, user_id,
+       old_data, new_data, diff, context_id, meta
+FROM p
+WHERE NOT (
+    table_name IN ('orders', 'invoices')
+    AND diff IS NOT NULL
+    AND NOT EXISTS (
+        SELECT 1 FROM jsonb_each(diff) e
+        WHERE jsonb_typeof(e.value) <> 'object'
+           OR NOT (e.value ? 'old' AND e.value ? 'new')
+    )
+);
+
+-- Stop here if the counts differ.
+SELECT (SELECT count(*) FROM p) AS old_rows,
+       (SELECT count(*) FROM p_new) AS new_rows;
+
+ALTER TABLE auditlog DETACH PARTITION p;
+ALTER TABLE auditlog ATTACH PARTITION p_new
+    FOR VALUES FROM ('2026-01-01') TO ('2026-02-01');
+DROP TABLE p;
+
+COMMIT;
+```
+
+Run the count check and compare the two numbers before the `DETACH`;
+roll back if they differ. `LIKE ... INCLUDING ALL` does not copy foreign
+keys or triggers, which is fine for `ATTACH`.
+
+The column list above is the base `auditlog` schema. If you enabled the
+hash chain, append `row_hash, prev_hash, chain_seq` to both the target
+and the select lists, in the same order. Only rows whose `diff` is in
+the paired `{old, new}` shape can lose their snapshots (the guard
+above); rows written before 0.4 carry a values-only `diff` and are
+copied as they are. With the hash chain enabled, rewriting the
+snapshots still breaks it for the rewritten rows: `row_hash` was
+computed over the snapshots, and `auditrum verify-chain` will report
+them.
+
 ## Things to check after any migration
 
 1. **Trigger presence.** ``auditrum status`` lists all installed

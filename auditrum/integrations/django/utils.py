@@ -124,7 +124,13 @@ def render_log_changes(log: AuditLog) -> str | SafeString:
     if model_class is None:
         return "—"
 
-    if log.operation == "INSERT" and log.new_data:
+    old_data = log.old_data
+    new_data = log.new_data
+    if isinstance(log.diff, dict) and old_data is None and new_data is None:
+        old_data = {k: v.get("old") for k, v in log.diff.items() if isinstance(v, dict)}
+        new_data = {k: v.get("new") for k, v in log.diff.items() if isinstance(v, dict)}
+
+    if log.operation == "INSERT" and new_data:
         return format_html(
             "<ul class='space-y-1'>{}</ul>",
             mark_safe(
@@ -132,12 +138,12 @@ def render_log_changes(log: AuditLog) -> str | SafeString:
                     format_html(
                         "<li><strong>{}</strong>: {}</li>", *resolve_field_value(model_class, k, v)
                     )
-                    for k, v in log.new_data.items()
+                    for k, v in new_data.items()
                 )
             ),
         )
 
-    elif log.operation == "DELETE" and log.old_data:
+    elif log.operation == "DELETE" and old_data:
         return format_html(
             "<ul class='space-y-1 text-red-700'>{}</ul>",
             mark_safe(
@@ -146,16 +152,16 @@ def render_log_changes(log: AuditLog) -> str | SafeString:
                         "<li><strong>{}</strong>: <span class='line-through'>{}</span></li>",
                         *resolve_field_value(model_class, k, v),
                     )
-                    for k, v in log.old_data.items()
+                    for k, v in old_data.items()
                 )
             ),
         )
 
-    elif log.old_data and log.new_data:
+    elif old_data and new_data:
         diffs = []
-        for key in sorted(set(log.old_data) | set(log.new_data)):
-            old_val = log.old_data.get(key)
-            new_val = log.new_data.get(key)
+        for key in sorted(set(old_data) | set(new_data)):
+            old_val = old_data.get(key)
+            new_val = new_data.get(key)
             if old_val != new_val:
                 label, old_str = resolve_field_value(model_class, key, old_val)
                 _, new_str = resolve_field_value(model_class, key, new_val)

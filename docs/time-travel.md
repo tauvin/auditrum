@@ -2,26 +2,64 @@
 
 Reconstruct the state of any row — or any whole table — at any past
 timestamp, without PostgreSQL's `temporal_tables` extension and without
-per-model shadow tables. Because every audit event stores the full row
-snapshot in `old_data` / `new_data`, the "latest event at or before
-`t`" gives us back the entire state — minus any columns outside the
-table's field filter, which are never written to the audit log.
+per-model shadow tables. Reconstruction works for both storage modes
+(see [Storage mode](concepts.md#storage-mode)): tables that keep full
+`old_data` / `new_data` snapshots, and tables in `storage="diff"` mode
+that keep only the paired `diff`. Columns outside the table's field
+filter are never written to the audit log and are never returned.
 
 ## How it works
 
-Two PL/SQL helper functions are installed alongside the audit log:
+Two PL/pgSQL helper functions are installed alongside the audit log:
 
 ```sql
 _audit_reconstruct_row(p_table text, p_object_id text, p_at timestamptz) RETURNS jsonb
 _audit_reconstruct_table(p_table text, p_at timestamptz) RETURNS TABLE(object_id text, row_data jsonb)
 ```
 
-Both are `STABLE` SQL functions that walk the
-`(table_name, object_id, changed_at DESC)` composite index for an
-O(log n) lookup per row. `DELETE` events map to `NULL` (the row didn't
-exist at that time); a row that was inserted, deleted, and re-inserted
-returns whatever state the most recent event before the target
-timestamp describes.
+Both are `STABLE SECURITY INVOKER`: they run with the caller's
+privileges (see [Hardening](hardening.md#time-travel-privileges)). The
+functions are `STABLE`, so every statement inside them sees the caller's
+snapshot: the live row and the audit rows are consistent.
+
+**Ordering and the suffix.** Events are ordered by `id`, not by
+`changed_at`. `changed_at` is the transaction start time, so a
+transaction that started first can write second; `id` follows the
+order the audit rows were actually inserted, which is the order the row
+changes were made. For a target time `at`, the *suffix* of an object is
+every event from the first event (lowest `id`) with `changed_at > at`
+onwards, including later events whose own `changed_at` happens to be
+earlier.
+
+**State at `at`**, decided per row:
+
+1. If the suffix is non-empty, take its earliest event `E`.
+    - `E` is an `INSERT`: the row did not exist, the result is `NULL`.
+    - `E` carries an `old_data` snapshot (a `full` row): return it. This
+      is the snapshot short-cut and costs the same as a plain lookup.
+    - Otherwise start from the live row and, for each column, replace
+      its value with the `old` of the earliest suffix event that touched
+      that column. Columns no suffix event touched keep their live
+      value. If the row no longer exists, the base is empty and the
+      `DELETE` in the suffix supplies every column.
+2. If the suffix is empty, take the latest event with `changed_at <= at`.
+   A `new_data` snapshot is returned as is; a `DELETE` gives `NULL`.
+   If the latest event has no snapshot (it is diff-only), or there are
+   no events and the registry says the table is in diff mode, the
+   result is the live row, or `NULL` if there is none. A full table with
+   no events returns `NULL`.
+
+Backward replay never needs the original `INSERT`, so dropping old
+partitions stays safe.
+
+**The live row and the registry.** For tables that have diff-only rows
+the live row is read from the tracked table by primary key (`id`), and
+the field filter and storage mode come from `auditrum_applied_triggers`.
+Such a table raises an error when the live row is needed and the
+registry has no readable entry for it (the row is missing or the caller
+has no `SELECT` on the registry). `full` tables never need the live row
+for the snapshot path, so installs without a registry entry, and
+callers without `SELECT` on the registry, keep working.
 
 You can call these directly from SQL, or through the Python wrappers
 in `auditrum.timetravel`, or via the Django/SA helpers that ship on
@@ -74,11 +112,13 @@ for obj_id, row_data in snapshot.items():
     print(obj_id, row_data["status"], row_data["total"])
 ```
 
-Streams `(object_id, row_data)` tuples via a server-side `DISTINCT ON
-(object_id)` query. Deleted rows are filtered out automatically. Under
-the hood this is a single round trip — if the table has a million
-historical events but only a few thousand distinct `object_id`s, you
-get back a few thousand rows.
+Streams `(object_id, row_data)` tuples from a single set-based query
+that groups events per `object_id`. Deleted rows are filtered out
+automatically. Under the hood this is a single round trip — if the
+table has a million historical events but only a few thousand distinct
+`object_id`s, you get back a few thousand rows. On a diff table it also
+scans the live table; see [Semantics and limits](#semantics-and-limits)
+for the cost.
 
 ### `reconstruct_field_history` — timeline of one column
 
@@ -195,26 +235,49 @@ Or one-object-per-line with `--format jsonl` when streaming the whole
 table, so you can pipe it into `jq`, Parquet tools, or a data lake
 loader.
 
-## Edge cases and caveats
+## Semantics and limits
 
-- **Tracked fields only**. `reconstruct_row` returns the full row as
-  captured in `new_data`, which is the full `to_jsonb(NEW)` snapshot.
-  `track_only` / `exclude` settings affect which columns are in the
-  `diff`, not in `old_data` / `new_data`. So time travel works even
-  for fields you said you didn't want to diff.
-- **Log conditions change the picture**. If the trigger has a
-  `log_condition` that suppresses certain updates, time travel only
-  reflects events that were actually recorded. A row whose `is_active`
-  field flipped under a `log_condition="NEW.is_active"` gate might
-  reconstruct to a stale state.
-- **Partition pruning helps**. Because `auditlog` is partitioned by
-  `changed_at`, a time-travel query for `at = 2024-06-01` only reads
-  the partitions up to June 2024. The composite index further narrows
-  the scan to a single row per object_id.
-- **Timestamp at or before**. The semantics are "most recent event with
-  `changed_at <= at`". If you pass a timestamp between two updates,
-  you get the state after the earlier one.
-- **No PII masking on historical queries**. Time travel gives you
+- **Excluded columns are never returned.** Columns outside the field
+  filter are not in the audit log, and the live row is filtered with
+  the same rule, so they cannot leak into a reconstructed row.
+- **Schema drift.** A column added after `at` shows its current value
+  (the audit log has nothing older); a dropped column disappears from
+  the result.
+- **`changed_at` is the transaction start.** A change written before
+  `at` by a transaction that committed after `at` counts as applied at
+  `at`. This is inherent to `now()`.
+- **Log conditions change the picture.** A `log_condition` that
+  suppresses updates leaves gaps in the history, so full tables may
+  reconstruct a stale state. Diff storage cannot be combined with
+  `log_condition` for exactly this reason.
+- **Cost.** `reconstruct_row` is O(events after `at`) for the object.
+  It reads the latest event with `ORDER BY id DESC`, which the
+  `(table_name, object_id, changed_at DESC)` index cannot order, so a
+  lookup reads the object's whole history. `reconstruct_table` filters
+  only on `table_name`, so it reads every event of the table (and, on a
+  diff table, scans the live table too), however recent `at` is.
+  Reconstructing a table as of a year ago still costs a pass over its
+  whole audit history. Only the probe for events after `at` uses a
+  `changed_at > at` range.
+- **Per-row rule after a mode switch.** A table that switches from diff
+  back to full keeps reading the live row for objects whose latest
+  event is diff-only. Untracked rows (no events at all) appear in
+  `reconstruct_table` only while the table is in diff mode.
+- **Privileges and errors.** `_audit_reconstruct_table` raises when
+  diff-only rows exist but the table has no readable registry entry.
+  `_audit_reconstruct_row` raises only when the requested row has
+  diff-only events and needs the live table. Rows of a diff table with
+  no events at all depend on the registry to be recognised: without a
+  readable entry they come back as `NULL` (and are left out of
+  `reconstruct_table`) instead of raising. See
+  [Time-travel privileges](hardening.md#time-travel-privileges).
+- **The reconstructable window is the retained window.** Once a
+  partition is dropped, states inside it can no longer be rebuilt.
+- **Writes that bypass the trigger break diff reconstruction silently.**
+  `session_replication_role = replica`, `ALTER TABLE ... DISABLE
+  TRIGGER`, `TRUNCATE` and bulk loads that skip triggers leave no
+  events, so a diff table reconstructs a wrong state around them.
+- **No PII masking on historical queries.** Time travel gives you
   back whatever was in the row at the time. If you need to comply with
   erasure requests, see the pseudonymization notes in
   [hardening](hardening.md#gdpr).

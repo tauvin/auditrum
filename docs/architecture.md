@@ -127,7 +127,6 @@ For a tracked table `orders`, the generator produces something like:
 ```sql
 CREATE OR REPLACE FUNCTION audit_orders_trigger() RETURNS trigger AS $$
 DECLARE
-    data JSONB;
     diff JSONB;
     ignored_keys TEXT[] := ARRAY['password']::text[];   -- from field filter
     old_filtered jsonb := to_jsonb(OLD);
@@ -156,20 +155,14 @@ BEGIN
         );
     END IF;
 
-    IF (TG_OP = 'DELETE') THEN
-        data = to_jsonb(OLD);
-    ELSE
-        data = to_jsonb(NEW);
-    END IF;
-
     INSERT INTO auditlog (
         operation, changed_at, object_id, table_name,
         user_id, old_data, new_data, diff, context_id, meta
     ) VALUES (
         TG_OP, now(), NULL, TG_TABLE_NAME,
         _audit_current_user_id(),
-        CASE WHEN TG_OP IN ('UPDATE', 'DELETE') THEN old_filtered ELSE NULL END,
-        CASE WHEN TG_OP IN ('UPDATE', 'INSERT') THEN new_filtered ELSE NULL END,
+        {old_data_expr},
+        {new_data_expr},
         diff,      -- paired shape, written for every operation
         _audit_attach_context(),
         NULL
@@ -182,6 +175,19 @@ CREATE TRIGGER audit_orders_trigger
 AFTER INSERT OR UPDATE OR DELETE ON orders
 FOR EACH ROW EXECUTE FUNCTION audit_orders_trigger();
 ```
+
+`{old_data_expr}` and `{new_data_expr}` depend on the table's
+[storage mode](concepts.md#storage-mode). With `storage="full"` (the
+default) they render the filtered snapshots shown below, and the
+generated SQL is what you would expect from the rest of this page:
+
+```sql
+CASE WHEN TG_OP IN ('UPDATE', 'DELETE') THEN old_filtered ELSE NULL END,
+CASE WHEN TG_OP IN ('UPDATE', 'INSERT') THEN new_filtered ELSE NULL END,
+```
+
+With `storage="diff"` both render as `NULL` and `diff` is the only copy
+of the change.
 
 Notable decisions:
 
@@ -196,11 +202,14 @@ Notable decisions:
    works on any managed Postgres (RDS, Cloud SQL, etc.) without
    requiring `CREATE EXTENSION`.
 3. **`old_data` / `new_data` store the full filtered row**, not just
-   the changed columns. This is what makes time travel work — the
-   reconstruct functions don't need the diff, they just take the most
-   recent `new_data`. Columns outside the field filter are stripped from
-   the snapshots as well as from the diff, so an excluded column never
-   reaches the audit log.
+   the changed columns, unless the table uses `storage="diff"`. With
+   snapshots, time travel takes the most recent `new_data` (or the
+   `old_data` of the first later event) without reading the diff. In
+   diff mode both columns are `NULL` and the reconstruct functions fold
+   the `diff` events back from the live row instead; see
+   [Time travel](time-travel.md#how-it-works). Columns outside the field
+   filter are stripped from the snapshots as well as from the diff, so an
+   excluded column never reaches the audit log.
 4. **`diff IS NULL` early return** for UPDATE. If the filtered `diff`
    is empty (every changed column was in `ignored_keys`), we skip the
    INSERT entirely. No rows in `auditlog`, no `audit_context` upsert.
@@ -450,7 +459,9 @@ automatically skipped when the docker socket isn't reachable.
   the extra ~120 bytes per statement. Measurable but small.
 - **Composite `target_idx` + partition pruning** means per-row history
   queries are O(log n) in the size of the relevant partition, not the
-  size of the whole log. Scale to hundreds of millions of events
+  size of the whole log. Time travel is the exception: it costs
+  O(events after the target time) per row (see
+  [Time travel](time-travel.md#semantics-and-limits)). Scale to hundreds of millions of events
   without query regression.
 - **Hash chain serialises inserts**. If you enable it, expect a
   throughput ceiling equal to "one audit insert at a time per

@@ -1,5 +1,6 @@
 import pytest
 
+from auditrum.tracking.spec import TrackSpec
 from auditrum.triggers import generate_trigger_sql
 
 
@@ -200,3 +201,18 @@ class TestTriggerRoundtrip:
             assert row[0] is None
             cur.execute("SELECT COUNT(*) FROM audit_context")
             assert cur.fetchone()[0] == 0
+
+    def test_diff_storage_writes_only_diff(self, sample_table):
+        conn = sample_table
+        with conn.cursor() as cur:
+            cur.execute(TrackSpec(table="users", storage="diff").build().install_sql)
+            cur.execute("INSERT INTO users (name, email) VALUES ('f', 'f@x.com')")
+            cur.execute("UPDATE users SET email = 'f2@x.com' WHERE name = 'f'")
+            cur.execute("DELETE FROM users WHERE name = 'f'")
+            cur.execute("SELECT operation, old_data, new_data, diff FROM auditlog ORDER BY id")
+            rows = cur.fetchall()
+        assert [r[0] for r in rows] == ["INSERT", "UPDATE", "DELETE"]
+        assert all(r[1] is None and r[2] is None for r in rows)
+        assert rows[0][3]["email"] == {"old": None, "new": "f@x.com"}
+        assert rows[1][3] == {"email": {"old": "f@x.com", "new": "f2@x.com"}}
+        assert rows[2][3]["email"] == {"old": "f2@x.com", "new": None}

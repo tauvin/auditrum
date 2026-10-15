@@ -20,6 +20,7 @@ from auditrum.tracking._template import render
 __all__ = [
     "FieldFilter",
     "FieldFilterKind",
+    "StorageMode",
     "TrackSpec",
     "TriggerBundle",
     "validate_identifier",
@@ -48,6 +49,7 @@ def validate_identifier(name: str, label: str) -> str:
 
 
 FieldFilterKind = Literal["all", "only", "exclude"]
+StorageMode = Literal["full", "diff"]
 
 
 @dataclass(frozen=True)
@@ -133,6 +135,8 @@ class TrackSpec:
             when the expression is false. **Trusted input** — never pass
             user-supplied strings here.
         trigger_name: override default ``audit_{table}_trigger`` name
+        storage: ``"full"`` writes old_data/new_data snapshots; ``"diff"``
+            writes only the paired diff and reconstructs history from it
     """
 
     table: str
@@ -141,6 +145,7 @@ class TrackSpec:
     extra_meta_fields: tuple[str, ...] = ()
     log_condition: str | None = None
     trigger_name: str | None = None
+    storage: StorageMode = "full"
 
     def __post_init__(self) -> None:
         validate_identifier(self.table, "table")
@@ -149,6 +154,13 @@ class TrackSpec:
             validate_identifier(f, "extra_meta_field")
         if self.trigger_name is not None:
             validate_identifier(self.trigger_name, "trigger_name")
+        if self.storage not in ("full", "diff"):
+            raise ValueError(f"Invalid storage: {self.storage!r} (must be 'full' or 'diff')")
+        if self.storage == "diff" and self.log_condition is not None:
+            raise ValueError(
+                "storage='diff' cannot be combined with log_condition: events skipped "
+                "by the condition leave gaps that diff-based reconstruction cannot detect."
+            )
 
     @property
     def effective_trigger_name(self) -> str:
@@ -165,6 +177,14 @@ class TrackSpec:
         pairs = ", ".join(f"'{f}', to_jsonb(NEW.{f})" for f in self.extra_meta_fields)
         return f"jsonb_build_object({pairs})"
 
+    def _snapshot_exprs(self) -> tuple[str, str]:
+        if self.storage == "diff":
+            return "NULL::jsonb", "NULL::jsonb"
+        return (
+            "CASE WHEN TG_OP IN ('UPDATE', 'DELETE') THEN old_filtered ELSE NULL END",
+            "CASE WHEN TG_OP IN ('UPDATE', 'INSERT') THEN new_filtered ELSE NULL END",
+        )
+
     def _log_conditions_block(self) -> str:
         if self.log_condition is None:
             return ""
@@ -172,6 +192,7 @@ class TrackSpec:
 
     def build(self) -> TriggerBundle:
         """Render install/uninstall SQL + compute a drift-detection checksum."""
+        old_data_expr, new_data_expr = self._snapshot_exprs()
         install_sql = render(
             "audit_trigger.sql",
             function_name=self.function_name,
@@ -181,6 +202,8 @@ class TrackSpec:
             ignored_keys_expr=self.fields.to_ignored_keys_expr(),
             log_conditions_block=self._log_conditions_block(),
             meta_expr=self._meta_expr(),
+            old_data_expr=old_data_expr,
+            new_data_expr=new_data_expr,
         ).strip()
 
         uninstall_sql = (
@@ -209,6 +232,7 @@ class TrackSpec:
             "extra_meta_fields": list(self.extra_meta_fields),
             "log_condition": self.log_condition,
             "trigger_name": self.trigger_name,
+            "storage": self.storage,
         }
 
 

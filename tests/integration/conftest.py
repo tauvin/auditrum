@@ -87,6 +87,11 @@ def fresh_auditlog(pg_conn):
             "DROP FUNCTION IF EXISTS _audit_reconstruct_row(text, text, timestamptz) CASCADE"
         )
         cur.execute("DROP FUNCTION IF EXISTS _audit_reconstruct_table(text, timestamptz) CASCADE")
+        cur.execute("DROP FUNCTION IF EXISTS _audit_live_rows(text, jsonb) CASCADE")
+        cur.execute("DROP FUNCTION IF EXISTS _audit_live_row(text, text, jsonb) CASCADE")
+        cur.execute("DROP FUNCTION IF EXISTS _audit_tracked_spec(text) CASCADE")
+        cur.execute("DROP FUNCTION IF EXISTS _audit_filter_row(jsonb, jsonb) CASCADE")
+        cur.execute("DROP TABLE IF EXISTS auditrum_applied_triggers CASCADE")
         cur.execute(generate_audit_context_table_sql("audit_context"))
         cur.execute(generate_auditlog_table_sql("auditlog"))
         cur.execute(generate_jsonb_diff_function_sql())
@@ -102,5 +107,10 @@ def fresh_auditlog(pg_conn):
             "DROP FUNCTION IF EXISTS _audit_reconstruct_row(text, text, timestamptz) CASCADE"
         )
         cur.execute("DROP FUNCTION IF EXISTS _audit_reconstruct_table(text, timestamptz) CASCADE")
+        cur.execute("DROP FUNCTION IF EXISTS _audit_live_rows(text, jsonb) CASCADE")
+        cur.execute("DROP FUNCTION IF EXISTS _audit_live_row(text, text, jsonb) CASCADE")
+        cur.execute("DROP FUNCTION IF EXISTS _audit_tracked_spec(text) CASCADE")
+        cur.execute("DROP FUNCTION IF EXISTS _audit_filter_row(jsonb, jsonb) CASCADE")
+        cur.execute("DROP TABLE IF EXISTS auditrum_applied_triggers CASCADE")
         cur.execute("DROP TABLE IF EXISTS auditlog CASCADE")
         cur.execute("DROP TABLE IF EXISTS audit_context CASCADE")

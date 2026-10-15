@@ -66,28 +66,40 @@ def generate_audit_attach_context_sql(
     ).strip()
 
 
-def generate_audit_reconstruct_sql(audit_table: str = "auditlog") -> str:
-    """Generate the ``_audit_reconstruct_row`` and ``_audit_reconstruct_table``
-    SQL helpers used by time-travel queries.
+def generate_audit_reconstruct_sql(
+    audit_table: str = "auditlog",
+    tracking_table: str = "auditrum_applied_triggers",
+) -> str:
+    """Generate the time-travel SQL helpers.
 
-    ``_audit_reconstruct_row(table, object_id, at)`` returns the full row
-    as it existed at ``at``, or ``NULL`` if the row didn't exist (before
-    its INSERT or after its DELETE).
+    ``_audit_reconstruct_row(table, object_id, at)`` returns the row as it
+    existed at ``at``, or ``NULL`` if it did not exist then.
+    ``_audit_reconstruct_table(table, at)`` returns every row alive at
+    ``at`` as ``(object_id, row_data jsonb)`` pairs.
 
-    ``_audit_reconstruct_table(table, at)`` returns every surviving row
-    in the given tracked table at the target timestamp, as ``(object_id,
-    row_data jsonb)`` pairs — DELETE'd rows are filtered out.
+    Both undo the per-object suffix of events written after ``at`` (in
+    ``id`` order) on top of the live row, taking each column's ``old``
+    from the earliest suffix event that touched it, and short-cut through
+    ``old_data`` when that event carries a snapshot. Tables in diff
+    storage need their field filter, which is read from ``tracking_table``
+    (the :class:`~auditrum.tracking.TriggerManager` registry).
 
-    Both rely on the ``(table_name, object_id, changed_at DESC)``
-    composite index for fast lookups and work on arbitrary historical
-    timestamps without a separate temporal_tables extension.
+    All functions are ``SECURITY INVOKER``: the caller needs ``SELECT`` on
+    the audit table, the registry and, for diff tables, the tracked table.
     """
     from auditrum.tracking._template import render
 
     validate_identifier(audit_table, "audit_table")
-    row_sql = render("audit_reconstruct_row.sql", audit_table=audit_table)
-    table_sql = render("audit_reconstruct_table.sql", audit_table=audit_table)
-    return f"{row_sql.strip()}\n\n{table_sql.strip()}"
+    validate_identifier(tracking_table, "tracking_table")
+    names = (
+        "audit_reconstruct_helpers.sql",
+        "audit_reconstruct_row.sql",
+        "audit_reconstruct_table.sql",
+    )
+    return "\n\n".join(
+        render(name, audit_table=audit_table, tracking_table=tracking_table).strip()
+        for name in names
+    )
 
 
 def generate_audit_current_user_id_sql(

@@ -25,6 +25,7 @@ from collections.abc import Callable
 from typing import TYPE_CHECKING, Any, TypeVar
 
 from auditrum.tracking import FieldFilter, TrackSpec
+from auditrum.tracking.spec import StorageMode
 
 __all__ = [
     "clear_registry",
@@ -68,6 +69,7 @@ def track(
     log_condition: str | None = None,
     audit_table: str | None = None,
     trigger_name: str | None = None,
+    storage: StorageMode = "full",
 ) -> Callable[[T], T]:
     """Declarative decorator: attach an audit :class:`TrackSpec` to a model.
 
@@ -77,6 +79,9 @@ def track(
 
     Re-decorating the same class overwrites its existing spec, which is
     usually what you want during development (reload-friendly).
+
+    ``storage="diff"`` opts into diff-only storage: UPDATE rows keep only
+    the changed fields (see :class:`auditrum.tracking.TrackSpec`).
     """
     # Validate eagerly before we see the model class so a call like
     # ``@track(fields=[...], exclude=[...])`` fails at decoration time with
@@ -93,6 +98,7 @@ def track(
             extra_meta_fields=tuple(extra_meta or ()),
             log_condition=log_condition,
             trigger_name=trigger_name,
+            storage=storage,
         )
         _registry[_model_key(model_cls)] = spec
         # Store spec on the class too, so introspection via

@@ -25,6 +25,7 @@ from typing import Any, Literal
 from psycopg import sql as pg_sql
 
 from auditrum.executor import ConnectionProtocol
+from auditrum.timetravel import _diff_side
 from auditrum.tracking.spec import validate_identifier
 
 __all__ = [
@@ -61,10 +62,9 @@ def fetch_blame(
 ) -> list[BlameEntry]:
     """Fetch the audit history of a single row.
 
-    Uses the ``(table_name, object_id, changed_at DESC)`` composite index
-    for a fast range scan. When ``field`` is given, filters in-Python
-    after the SQL pull so the index is still fully used — the field
-    narrow is small-cardinality relative to the row history.
+    Rows are ordered by ``id`` (write order). When ``field`` is given, filters in-Python
+    after the SQL pull — the field narrow is small-cardinality relative
+    to the row history.
     """
     validate_identifier(audit_table, "audit_table")
     validate_identifier(context_table, "context_table")
@@ -75,7 +75,7 @@ def fetch_blame(
         "FROM {audit_table} a "
         "LEFT JOIN {context_table} c ON c.id = a.context_id "
         "WHERE a.table_name = %s AND a.object_id = %s "
-        "ORDER BY a.changed_at ASC, a.id ASC "
+        "ORDER BY a.id ASC "
         "LIMIT %s"
     ).format(
         audit_table=pg_sql.Identifier(audit_table),
@@ -96,6 +96,10 @@ def fetch_blame(
             old_data = json.loads(old_data)
         if isinstance(new_data, str):
             new_data = json.loads(new_data)
+        if old_data is None and operation != "INSERT":
+            old_data = _diff_side(diff, "old")
+        if new_data is None and operation != "DELETE":
+            new_data = _diff_side(diff, "new")
 
         change_reason = None
         if metadata and isinstance(metadata, dict):
