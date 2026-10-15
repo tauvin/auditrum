@@ -44,8 +44,10 @@ earlier.
       `DELETE` in the suffix supplies every column.
 2. If the suffix is empty, take the latest event with `changed_at <= at`.
    A `new_data` snapshot is returned as is; a `DELETE` gives `NULL`.
-   With no snapshot (diff mode, or no events at all) the result is the
-   live row, or `NULL` if there is none.
+   If the latest event has no snapshot (it is diff-only), or there are
+   no events and the registry says the table is in diff mode, the
+   result is the live row, or `NULL` if there is none. A full table with
+   no events returns `NULL`.
 
 Backward replay never needs the original `INSERT`, so dropping old
 partitions stays safe.
@@ -249,11 +251,12 @@ loader.
 - **Cost.** `reconstruct_row` is O(events after `at`) for the object.
   It reads the latest event with `ORDER BY id DESC`, which the
   `(table_name, object_id, changed_at DESC)` index cannot order, so a
-  lookup reads the object's whole history. `reconstruct_table` on a diff
-  table scans the live table and every event of the table after `at`:
-  reconstructing a table as of a year ago walks a year of audit for it.
-  Partition pruning on `changed_at` still limits which partitions are
-  read.
+  lookup reads the object's whole history. `reconstruct_table` filters
+  only on `table_name`, so it reads every event of the table (and, on a
+  diff table, scans the live table too), however recent `at` is.
+  Reconstructing a table as of a year ago still costs a pass over its
+  whole audit history. Only the probe for events after `at` uses a
+  `changed_at > at` range.
 - **Per-row rule after a mode switch.** A table that switches from diff
   back to full keeps reading the live row for objects whose latest
   event is diff-only. Untracked rows (no events at all) appear in

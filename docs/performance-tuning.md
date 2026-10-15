@@ -262,8 +262,8 @@ width; run the benchmark against a table shaped like yours.
 
 The latency column covers only the "current state" path (the live-row
 path). Reconstruction further back walks the events after the target
-time, and ``reconstruct_table`` on a diff table scans the live table
-and every event of the table; see
+time, and ``reconstruct_table`` reads every event of the table (and
+scans the live table in diff mode); see
 [Semantics and limits](time-travel.md#semantics-and-limits). Pick diff
 storage for tables where audit volume matters more than deep time
 travel latency.

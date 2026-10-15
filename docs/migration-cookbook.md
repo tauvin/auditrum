@@ -494,18 +494,40 @@ BEGIN;
 
 CREATE TABLE p_new (LIKE p INCLUDING ALL);
 
--- Rows of diff tables: drop the snapshots, keep everything else
--- (including id: reconstruction orders by it).
-INSERT INTO p_new
-SELECT id, operation, changed_at, table_name, object_id, user_id,
-       NULL, NULL, diff, context_id, meta, row_hash, prev_hash
+-- Rows of diff tables with a paired diff: drop the snapshots, keep
+-- everything else (including id: reconstruction orders by it).
+INSERT INTO p_new (id, operation, changed_at, object_id, table_name, user_id,
+                   old_data, new_data, diff, context_id, meta)
+SELECT id, operation, changed_at, object_id, table_name, user_id,
+       NULL, NULL, diff, context_id, meta
 FROM p
-WHERE table_name IN ('orders', 'invoices');   -- your diff tables
+WHERE table_name IN ('orders', 'invoices')   -- your diff tables
+  AND diff IS NOT NULL
+  AND NOT EXISTS (
+      SELECT 1 FROM jsonb_each(diff) e
+      WHERE jsonb_typeof(e.value) <> 'object'
+         OR NOT (e.value ? 'old' AND e.value ? 'new')
+  );
 
--- Rows of every other table, untouched.
-INSERT INTO p_new
-SELECT * FROM p
-WHERE table_name NOT IN ('orders', 'invoices');
+-- Every other row, untouched: exactly the complement of the predicate above.
+INSERT INTO p_new (id, operation, changed_at, object_id, table_name, user_id,
+                   old_data, new_data, diff, context_id, meta)
+SELECT id, operation, changed_at, object_id, table_name, user_id,
+       old_data, new_data, diff, context_id, meta
+FROM p
+WHERE NOT (
+    table_name IN ('orders', 'invoices')
+    AND diff IS NOT NULL
+    AND NOT EXISTS (
+        SELECT 1 FROM jsonb_each(diff) e
+        WHERE jsonb_typeof(e.value) <> 'object'
+           OR NOT (e.value ? 'old' AND e.value ? 'new')
+    )
+);
+
+-- Stop here if the counts differ.
+SELECT (SELECT count(*) FROM p) AS old_rows,
+       (SELECT count(*) FROM p_new) AS new_rows;
 
 ALTER TABLE auditlog DETACH PARTITION p;
 ALTER TABLE auditlog ATTACH PARTITION p_new
@@ -515,13 +537,19 @@ DROP TABLE p;
 COMMIT;
 ```
 
-Adjust the column list to your `auditlog` (the hash-chain columns exist
-only if you enabled it). Only rows whose `diff` is in the paired
-`{old, new}` shape can lose their snapshots; rows written before 0.4
-carry a values-only `diff`, so leave those tables' old rows as they
-are. If the hash chain is enabled, this breaks it for the rewritten
-rows: `row_hash` / `prev_hash` were computed over the snapshots, and
-`auditrum verify-chain` will report them.
+Run the count check and compare the two numbers before the `DETACH`;
+roll back if they differ. `LIKE ... INCLUDING ALL` does not copy foreign
+keys or triggers, which is fine for `ATTACH`.
+
+The column list above is the base `auditlog` schema. If you enabled the
+hash chain, append `row_hash, prev_hash, chain_seq` to both the target
+and the select lists, in the same order. Only rows whose `diff` is in
+the paired `{old, new}` shape can lose their snapshots (the guard
+above); rows written before 0.4 carry a values-only `diff` and are
+copied as they are. With the hash chain enabled, rewriting the
+snapshots still breaks it for the rewritten rows: `row_hash` was
+computed over the snapshots, and `auditrum verify-chain` will report
+them.
 
 ## Things to check after any migration
 
