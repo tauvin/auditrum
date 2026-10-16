@@ -224,6 +224,22 @@ def test_values_only_rows_are_kept(items):
     assert snapshot_count(items) == 1
 
 
+def test_rows_without_object_id_are_kept_and_paging_ends(items):
+    full_then_diff(items)
+    held = snapshot_count(items)
+    with items.cursor() as cur:
+        cur.execute(
+            "INSERT INTO auditlog (operation, changed_at, object_id, table_name, "
+            "old_data, new_data, diff) VALUES ('UPDATE', now(), NULL, 'cs_items', "
+            """'{"name": "w"}', '{"name": "x"}', '{"name": {"old": "w", "new": "x"}}'::jsonb)"""
+        )
+
+    result = compact_snapshots(items, table="cs_items", batch_size=2)
+
+    assert result.compacted == held
+    assert snapshot_count(items) == 1
+
+
 def test_small_batches_process_everything(items):
     full_then_diff(items)
     held = snapshot_count(items)

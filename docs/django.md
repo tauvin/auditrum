@@ -522,9 +522,9 @@ python manage.py auditrum_compact_snapshots --table orders --older-than '6 month
 ```
 
 Options: `--table` (required, repeatable), `--older-than`, `--batch-size`
-(objects per batch, default 1000), `--dry-run`, `--audit-table`. A table that fails is
-reported and skipped, and the command raises `CommandError` naming it
-after the others. What is kept, the limits and the `VACUUM` step:
+(objects per batch, default 1000), `--dry-run`, `--audit-table`. A
+table that fails is reported and skipped, and the command raises
+`CommandError` naming it after the others. What is kept, the limits and the `VACUUM` step:
 [Clearing old snapshots](migration-cookbook.md#clearing-old-snapshots).
 
 ## Tips and gotchas

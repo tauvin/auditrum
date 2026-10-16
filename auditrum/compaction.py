@@ -78,14 +78,16 @@ _UPDATE_SQL = (
     "(SELECT count(*) FROM {audit} a WHERE " + _ELIGIBLE + " AND {hashed} IS NOT NULL)"
 )
 
+# Rows with a NULL object_id (very old triggers, tables without an id
+# column) are never eligible; paging past them would also restart the scan.
 _FIRST_OBJECTS_SQL = (
     "SELECT DISTINCT a.object_id FROM {audit} a WHERE a.table_name = %(table)s "
-    "ORDER BY a.object_id LIMIT %(limit)s"
+    "AND a.object_id IS NOT NULL ORDER BY a.object_id LIMIT %(limit)s"
 )
 
 _NEXT_OBJECTS_SQL = (
     "SELECT DISTINCT a.object_id FROM {audit} a WHERE a.table_name = %(table)s "
-    "AND a.object_id > %(after)s ORDER BY a.object_id LIMIT %(limit)s"
+    "AND a.object_id IS NOT NULL AND a.object_id > %(after)s ORDER BY a.object_id LIMIT %(limit)s"
 )
 
 # Rows whose snapshots, read through the current field filter, record a
