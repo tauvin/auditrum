@@ -387,7 +387,7 @@ def verify_diff_chain(
         raise ValueError("verify_diff_chain needs since, object_id or full=True")
 
     query = _verify_query(audit_table, snapshots=snapshots, scoped=_object_ids is not None)
-    params = {
+    params: dict[str, Any] = {
         "table": table,
         "since": since,
         "object_id": None if object_id is None else str(object_id),

@@ -25,6 +25,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 from datetime import datetime
+from typing import Any
 
 from psycopg import sql
 
@@ -154,7 +155,11 @@ ORDER BY r.object_id, r.id
 """
 
 
-def _has_row_hash(cur, audit_table: str) -> bool:
+def _object_id_of(finding: DiffChainMismatch) -> str:
+    return finding.object_id
+
+
+def _has_row_hash(cur: Any, audit_table: str) -> bool:
     cur.execute(
         "SELECT 1 FROM pg_attribute WHERE attrelid = quote_ident(%s)::regclass "
         "AND attname = 'row_hash' AND NOT attisdropped",
@@ -164,7 +169,7 @@ def _has_row_hash(cur, audit_table: str) -> bool:
 
 
 def _snapshot_only_changes(
-    cur, audit: sql.Identifier, table: str, object_ids: list[str]
+    cur: Any, audit: sql.Identifier, table: str, object_ids: list[str]
 ) -> list[DiffChainMismatch]:
     cur.execute(
         sql.SQL(_SNAPSHOT_ONLY_SQL).format(audit=audit),
@@ -269,5 +274,5 @@ def compact_snapshots(
             cleared, hashed_rows = cur.fetchone()
             compacted += cleared
             skipped_hashed += hashed_rows
-    excluded.sort(key=lambda f: f.object_id)
+    excluded.sort(key=_object_id_of)
     return CompactionResult(table, compacted, skipped_hashed, tuple(excluded), dry_run)
