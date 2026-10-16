@@ -108,7 +108,8 @@ a skipped event would leave a gap that reconstruction cannot see.
 
 Switching a table between modes changes the trigger body, so run
 `auditrum_makemigrations` and `migrate` as for any spec change; old rows
-are left untouched. See
+are left untouched; `auditrum compact-snapshots` clears their snapshots
+([how](migration-cookbook.md#clearing-old-snapshots)). See
 [Switching a table to diff storage](migration-cookbook.md#switching-a-table-to-diff-storage)
 and [Performance tuning](performance-tuning.md#11-switch-hot-tables-to-diff-storage).
 

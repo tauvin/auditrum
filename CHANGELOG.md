@@ -8,6 +8,28 @@ the API stabilises.
 
 ## [Unreleased]
 
+### Added
+
+- **``compact-snapshots``: clear old snapshots of diff-mode tables.**
+  ``auditrum.compaction.compact_snapshots()``, ``auditrum compact-snapshots``
+  and ``manage.py auditrum_compact_snapshots`` set ``old_data`` /
+  ``new_data`` to NULL for rows written before a table was switched to
+  ``storage="diff"``, online and in batches of objects (``--batch-size``,
+  default 1000), so the space is reused by new writes. Reconstruction
+  already reads such rows from the diff. Each batch is checked with the
+  diff chain, snapshot values included; objects with findings and objects
+  whose snapshots record a change the diff does not (pre-0.6.2 rows under
+  a narrower field filter) keep their snapshots, as do rows covered by the
+  hash chain and rows without a fully paired diff. ``--dry-run`` counts,
+  ``--older-than`` limits the rows. Run ``VACUUM`` afterwards;
+  ``pg_repack`` or the partition-rewrite recipe returns the space to the
+  OS. See "Clearing old snapshots" in the migration cookbook for the
+  limits. No migration needed.
+- **``verify_diff_chain(..., snapshots=True)``.** Opt-in: also feeds the
+  snapshots of full-mode rows into the chain, so bypasses on columns no
+  diff ever touched are found. Slower; the default and the CLI / Django
+  ``verify-diff-chain`` commands are unchanged.
+
 ## [0.8.0] — 2026-10-15
 
 ### Added

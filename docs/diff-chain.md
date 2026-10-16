@@ -126,6 +126,12 @@ ignores `since`; `object_id` narrows either mode to one object. The
 table must be registered in `auditrum_applied_triggers` (tracked through
 `TriggerManager`), otherwise `ValueError`.
 
+`snapshots=True` also feeds `old_data` / `new_data` of full-mode rows
+into the chain, read through the current field filter, so a bypass on a
+column that no diff ever touched (a row that existed before tracking was
+installed) is found too. It reads every snapshot in scope and is slower;
+`compact-snapshots` uses it, the CLI and Django commands do not.
+
 Each `DiffChainMismatch` has:
 
 | Field | Meaning |
@@ -143,7 +149,8 @@ caps the total across tables. A table that cannot be checked (for
 example, it has no `id` column) is reported and skipped; the other
 tables are still checked and their findings printed, and the run exits
 2 naming the failed tables. The Django command does the same and raises
-`CommandError` when anything is found or a table failed. Details: [CLI reference](cli.md#verify-diff-chain),
+`CommandError` when anything is found or a table failed. Details:
+[CLI reference](cli.md#verify-diff-chain),
 [Django integration](django.md#diff-chain-check).
 
 ## What to do with a finding

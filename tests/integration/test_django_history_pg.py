@@ -18,6 +18,7 @@ broken at the column level. One real round-trip assertion closes
 the gap.
 """
 
+from io import StringIO
 from urllib.parse import urlparse
 
 import pytest
@@ -26,6 +27,7 @@ django = pytest.importorskip("django")
 pytest.importorskip("psycopg")
 
 from django.conf import settings as django_settings  # noqa: E402
+from django.core.management import call_command  # noqa: E402
 from django.db import connection as django_connection  # noqa: E402
 
 from auditrum.diff_chain import verify_diff_chain  # noqa: E402
@@ -532,3 +534,40 @@ def test_verify_diff_chain_through_django_connection(fresh_auditlog, configured_
     finally:
         with conn.cursor() as cur:
             cur.execute("DROP TABLE IF EXISTS vc_django CASCADE")
+
+
+def test_compact_snapshots_command_through_django_connection(fresh_auditlog, configured_django):
+    """Full-era snapshots are cleared through Django's connection (jsonb as str)."""
+    conn = fresh_auditlog
+    with conn.cursor() as cur:
+        cur.execute("DROP TABLE IF EXISTS cs_django CASCADE")
+        cur.execute("CREATE TABLE cs_django (id int PRIMARY KEY, name text)")
+    try:
+        mgr = TriggerManager(PsycopgExecutor(conn))
+        mgr.bootstrap()
+        mgr.install(TrackSpec(table="cs_django", storage="full"), force=True)
+        with conn.cursor() as cur:
+            cur.execute("INSERT INTO cs_django VALUES (1, 'a')")
+            cur.execute("UPDATE cs_django SET name = 'b' WHERE id = 1")
+        mgr.install(TrackSpec(table="cs_django", storage="diff"), force=True)
+        with conn.cursor() as cur:
+            cur.execute("UPDATE cs_django SET name = 'c' WHERE id = 1")
+            cur.execute(
+                "SELECT count(*) FROM auditlog WHERE table_name = 'cs_django' "
+                "AND (old_data IS NOT NULL OR new_data IS NOT NULL)"
+            )
+            assert cur.fetchone()[0] > 0
+
+        out = StringIO()
+        call_command("auditrum_compact_snapshots", "--table", "cs_django", stdout=out)
+
+        assert "cs_django: cleared snapshots of" in out.getvalue()
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT count(*) FROM auditlog WHERE table_name = 'cs_django' "
+                "AND (old_data IS NOT NULL OR new_data IS NOT NULL)"
+            )
+            assert cur.fetchone()[0] == 0
+    finally:
+        with conn.cursor() as cur:
+            cur.execute("DROP TABLE IF EXISTS cs_django CASCADE")

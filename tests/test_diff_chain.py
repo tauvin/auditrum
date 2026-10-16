@@ -58,6 +58,28 @@ class TestArguments:
             verify_diff_chain(conn, table="items", full=True)
 
 
+class TestQueryShape:
+    def _query(self, **kwargs):
+        conn, cur = _conn(fetchone=({"fields_kind": "all"},))
+        verify_diff_chain(conn, table="items", full=True, **kwargs)
+        query, params = cur.execute.call_args.args
+        return query.as_string(None), params
+
+    def test_default_reads_the_diff_only(self):
+        query, params = self._query()
+        assert "old_data" not in query and "_audit_filter_row" not in query
+        assert "object_ids" not in params
+
+    def test_snapshots_read_old_and_new_data(self):
+        query, _ = self._query(snapshots=True)
+        assert "a.old_data" in query and "_audit_filter_row" in query
+
+    def test_object_ids_narrow_every_read_of_the_audit_table(self):
+        query, params = self._query(snapshots=True, _object_ids=["1", "2"])
+        assert params["object_ids"] == ["1", "2"]
+        assert query.count("a.object_id = ANY(%(object_ids)s::text[])") == 2
+
+
 class TestDecoding:
     def test_string_jsonb_values_are_decoded(self):
         conn, cur = _conn(
@@ -98,3 +120,7 @@ class TestParseSince:
     def test_garbage(self):
         with pytest.raises(ValueError, match="invalid --since value 'yesterday-ish'.*ISO-8601"):
             parse_since("yesterday-ish")
+
+    def test_option_names_the_option_in_the_error(self):
+        with pytest.raises(ValueError, match="invalid --older-than value 'soon'"):
+            parse_since("soon", option="--older-than")

@@ -143,6 +143,147 @@ def test_excluded_column_bypass_is_ignored(items):
     assert verify_diff_chain(items, table="vc_items", full=True) == []
 
 
+def test_full_mode_pre_existing_row_bypass_is_a_live_finding(items):
+    with items.cursor() as cur:
+        cur.execute("INSERT INTO vc_items VALUES (1, 'a', 's', 0)")
+    tracked(items, "full")
+    with items.cursor() as cur:
+        cur.execute("UPDATE vc_items SET n = 5 WHERE id = 1")
+    bypass(items, "UPDATE vc_items SET name = 'zz' WHERE id = 1")
+    [finding] = verify_diff_chain(items, table="vc_items", full=True, snapshots=True)
+    assert (finding.object_id, finding.kind, finding.column) == ("1", "live", "name")
+    assert (finding.expected, finding.actual) == ("a", "zz")
+
+
+def test_full_mode_bypass_between_updates_is_a_chain_finding(items):
+    with items.cursor() as cur:
+        cur.execute("INSERT INTO vc_items VALUES (1, 'a', 's', 0)")
+    tracked(items, "full")
+    with items.cursor() as cur:
+        cur.execute("UPDATE vc_items SET n = 5 WHERE id = 1")
+    bypass(items, "UPDATE vc_items SET name = 'zz' WHERE id = 1")
+    with items.cursor() as cur:
+        cur.execute("UPDATE vc_items SET n = 6 WHERE id = 1")
+        cur.execute("SELECT max(id) FROM auditlog")
+        second = cur.fetchone()[0]
+    [finding] = verify_diff_chain(items, table="vc_items", full=True, snapshots=True)
+    assert (finding.object_id, finding.kind, finding.column) == ("1", "chain", "name")
+    assert finding.audit_id == second
+    assert (finding.expected, finding.actual) == ("a", "zz")
+
+
+def test_full_mode_history_with_pre_existing_rows_is_clean(items):
+    with items.cursor() as cur:
+        cur.execute("INSERT INTO vc_items VALUES (1, 'a', 's', 0), (2, 'b', 's', 0)")
+    tracked(items, "full")
+    with items.cursor() as cur:
+        cur.execute("UPDATE vc_items SET n = 5 WHERE id = 1")
+        cur.execute("UPDATE vc_items SET name = 'c' WHERE id = 1")
+        cur.execute("UPDATE vc_items SET n = 1 WHERE id = 2")
+        cur.execute("DELETE FROM vc_items WHERE id = 2")
+        cur.execute("INSERT INTO vc_items VALUES (2, 'z', 's', 3)")
+    assert verify_diff_chain(items, table="vc_items", full=True, snapshots=True) == []
+
+
+def test_pre_062_snapshots_with_excluded_columns_are_clean(items):
+    """Old snapshots hold the excluded column; a save that changed only it wrote no row."""
+    tracked(items, "full")
+    with items.cursor() as cur:
+        cur.execute("INSERT INTO vc_items VALUES (1, 'a', 's2', 0)")
+        cur.execute("DELETE FROM auditlog")
+        cur.execute(
+            "INSERT INTO auditlog (operation, changed_at, object_id, table_name, new_data, diff) "
+            "VALUES ('INSERT', now(), '1', 'vc_items', "
+            """'{"id": 1, "name": "a", "secret": "s", "n": 0}', """
+            """'{"id": {"old": null, "new": 1}, "name": {"old": null, "new": "a"}, """
+            """"n": {"old": null, "new": 0}}'::jsonb)"""
+        )
+        cur.execute("UPDATE vc_items SET name = 'b' WHERE id = 1")
+        cur.execute(
+            "UPDATE auditlog SET old_data = %s::jsonb, new_data = %s::jsonb "
+            "WHERE operation = 'UPDATE' AND table_name = 'vc_items'",
+            (
+                '{"id": 1, "name": "a", "secret": "s2", "n": 0}',
+                '{"id": 1, "name": "b", "secret": "s2", "n": 0}',
+            ),
+        )
+    assert verify_diff_chain(items, table="vc_items", full=True, snapshots=True) == []
+
+
+def test_snapshots_off_checks_only_the_diff(items):
+    """The default keeps the 0.8.0 check: columns no diff names are not compared."""
+    with items.cursor() as cur:
+        cur.execute("INSERT INTO vc_items VALUES (1, 'a', 's', 0)")
+    tracked(items, "full")
+    with items.cursor() as cur:
+        cur.execute("UPDATE vc_items SET n = 5 WHERE id = 1")
+    bypass(items, "UPDATE vc_items SET name = 'zz' WHERE id = 1")
+    with items.cursor() as cur:
+        cur.execute("UPDATE vc_items SET n = 6 WHERE id = 1")
+    assert verify_diff_chain(items, table="vc_items", full=True) == []
+    assert kinds(verify_diff_chain(items, table="vc_items", full=True, snapshots=True)) == {
+        ("1", "chain", "name")
+    }
+
+
+def test_full_mode_bypass_inside_a_long_history_is_a_chain_finding(items):
+    tracked(items, "full")
+    with items.cursor() as cur:
+        cur.execute("INSERT INTO vc_items VALUES (1, 'a', 's', 0)")
+        for n in range(1, 5):
+            cur.execute("UPDATE vc_items SET n = %s WHERE id = 1", (n,))
+    bypass(items, "UPDATE vc_items SET name = 'zz' WHERE id = 1")
+    with items.cursor() as cur:
+        cur.execute("UPDATE vc_items SET n = 10 WHERE id = 1")
+        cur.execute("SELECT max(id) FROM auditlog")
+        after_bypass = cur.fetchone()[0]
+        for n in range(11, 14):
+            cur.execute("UPDATE vc_items SET n = %s WHERE id = 1", (n,))
+    [finding] = verify_diff_chain(items, table="vc_items", full=True, snapshots=True)
+    assert (finding.kind, finding.column, finding.audit_id) == ("chain", "name", after_bypass)
+    assert (finding.expected, finding.actual) == ("a", "zz")
+
+
+def test_full_mode_bypass_after_a_long_history_is_a_live_finding(items):
+    tracked(items, "full")
+    with items.cursor() as cur:
+        cur.execute("INSERT INTO vc_items VALUES (1, 'a', 's', 0)")
+        for n in range(1, 5):
+            cur.execute("UPDATE vc_items SET n = %s WHERE id = 1", (n,))
+    bypass(items, "UPDATE vc_items SET name = 'zz' WHERE id = 1")
+    [finding] = verify_diff_chain(items, table="vc_items", full=True, snapshots=True)
+    assert (finding.kind, finding.column) == ("live", "name")
+    assert (finding.expected, finding.actual) == ("a", "zz")
+
+
+def test_bypass_between_full_and_diff_era_is_found_with_snapshots(items):
+    with items.cursor() as cur:
+        cur.execute("INSERT INTO vc_items VALUES (1, 'a', 's', 0)")
+    tracked(items, "full")
+    with items.cursor() as cur:
+        cur.execute("UPDATE vc_items SET n = 1 WHERE id = 1")
+    tracked(items, "diff")
+    bypass(items, "UPDATE vc_items SET name = 'zz' WHERE id = 1")
+    with items.cursor() as cur:
+        cur.execute("UPDATE vc_items SET n = 2 WHERE id = 1")
+        cur.execute("UPDATE vc_items SET n = 3 WHERE id = 1")
+    assert verify_diff_chain(items, table="vc_items", full=True) == []
+    [finding] = verify_diff_chain(items, table="vc_items", full=True, snapshots=True)
+    assert (finding.kind, finding.column) == ("live", "name")
+    assert (finding.expected, finding.actual) == ("a", "zz")
+
+
+def test_object_ids_scope_limits_the_check(items):
+    tracked(items, "full")
+    seed(items)
+    bypass(items, "UPDATE vc_items SET name = 'X' WHERE id IN (1, 2, 3)")
+    found = verify_diff_chain(
+        items, table="vc_items", full=True, snapshots=True, _object_ids=["1", "3"]
+    )
+    assert {f.object_id for f in found} == {"1", "3"}
+    assert verify_diff_chain(items, table="vc_items", full=True, _object_ids=[]) == []
+
+
 def legacy_row(conn, object_id, diff):
     """Insert a pre-0.4 style UPDATE row whose diff holds only the new values."""
     with conn.cursor() as cur:
@@ -241,10 +382,12 @@ def test_list_registered_tables_skips_log_condition_tables(items):
             cur.execute("DROP TABLE IF EXISTS vc_cond CASCADE")
 
 
+@pytest.mark.parametrize("storage", ["diff", "full"])
 @pytest.mark.parametrize("seed_value", range(5))
-def test_random_history_is_clean_until_one_bypass(items, seed_value):
+def test_random_history_is_clean_until_one_bypass(items, seed_value, storage):
     rnd = random.Random(seed_value)
-    tracked(items)
+    tracked(items, storage)
+    check = {"snapshots": storage == "full"}
     with items.cursor() as cur:
         for step in range(40):
             object_id = rnd.choice([1, 2, 3, 4])
@@ -262,7 +405,7 @@ def test_random_history_is_clean_until_one_bypass(items, seed_value):
                     "UPDATE vc_items SET name = %s, n = %s WHERE id = %s",
                     (f"v{step}", step, object_id),
                 )
-    assert verify_diff_chain(items, table="vc_items", full=True) == []
+    assert verify_diff_chain(items, table="vc_items", full=True, **check) == []
 
     with items.cursor() as cur:
         cur.execute("SELECT id FROM vc_items ORDER BY id")
@@ -272,7 +415,7 @@ def test_random_history_is_clean_until_one_bypass(items, seed_value):
     victim = rnd.choice(alive)
     bypass(items, "UPDATE vc_items SET n = -1 WHERE id = %s", (victim,))
     assert str(victim) in {
-        f.object_id for f in verify_diff_chain(items, table="vc_items", full=True)
+        f.object_id for f in verify_diff_chain(items, table="vc_items", full=True, **check)
     }
 
 
@@ -281,10 +424,11 @@ def set_timezone(conn, zone):
         cur.execute(sql.SQL("SET TimeZone = {}").format(sql.Literal(zone)))
 
 
-def test_timestamptz_written_and_checked_in_different_zones_is_clean(items):
+@pytest.mark.parametrize("storage", ["diff", "full"])
+def test_timestamptz_written_and_checked_in_different_zones_is_clean(items, storage):
     with items.cursor() as cur:
         cur.execute("ALTER TABLE vc_items ADD COLUMN at timestamptz")
-    tracked(items)
+    tracked(items, storage)
     with items.cursor() as cur:
         cur.execute("SHOW TimeZone")
         original = cur.fetchone()[0]
@@ -298,6 +442,7 @@ def test_timestamptz_written_and_checked_in_different_zones_is_clean(items):
             cur.execute("UPDATE vc_items SET at = '2026-10-03 12:00+00' WHERE id = 1")
         set_timezone(items, "Europe/Berlin")
         assert verify_diff_chain(items, table="vc_items", full=True) == []
+        assert verify_diff_chain(items, table="vc_items", full=True, snapshots=True) == []
     finally:
         set_timezone(items, original)
 

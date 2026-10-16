@@ -243,6 +243,35 @@ clean, 1 with findings, 2 on error. With no registered tables it exits
 2 because nothing was checked. A table that cannot be checked is
 reported and skipped; the others are still checked, and the run exits 2.
 
+### `compact-snapshots`
+
+Clear `old_data` / `new_data` of rows written before a table was switched
+to `storage="diff"`, keeping the diffs, online and in batches of objects.
+Each batch is checked first; objects with [diff chain](diff-chain.md)
+findings or with snapshot changes their diff does not record, rows
+covered by the hash chain and pre-0.4 rows are kept. Guide and limits:
+[Clearing old snapshots](migration-cookbook.md#clearing-old-snapshots).
+
+```bash
+auditrum compact-snapshots --table orders --dry-run
+auditrum compact-snapshots --table orders --table invoices --older-than '6 months'
+```
+
+| Option | Meaning |
+|---|---|
+| `--table T` | Diff-mode table, required, repeatable. There is no "all tables". |
+| `--older-than` | Only rows older than this: `'6 months'`, … or ISO-8601. |
+| `--batch-size N` | Objects per committed batch. Default 1000. |
+| `--dry-run` | Count rows without changing them. |
+| `--audit-table`, `--db-*` | As for the other commands. |
+
+Prints, per table, the rows cleared (`would clear` on `--dry-run`), the
+rows kept because of the hash chain, and the objects kept because of
+findings (the first 10). After a run that cleared rows it reminds
+you to run `VACUUM (ANALYZE)` on the audit table. Exit 0 on success
+(findings are reported, not failures), 2 when a table failed; the other
+tables are still processed. Needs `UPDATE` on the audit table.
+
 ---
 
 ## Retention

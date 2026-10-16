@@ -14,6 +14,7 @@ from rich import print as rich_print
 from rich.markup import escape
 
 from auditrum.blame import fetch_blame, format_blame
+from auditrum.compaction import compact_snapshots
 from auditrum.diff_chain import list_registered_tables, parse_since, verify_diff_chain
 from auditrum.hardening import generate_grant_admin_sql, generate_revoke_sql
 from auditrum.hash_chain import generate_hash_chain_sql, verify_chain
@@ -464,6 +465,88 @@ def verify_diff_chain_cmd(
         print(f"diff chain: could not check table(s): {', '.join(failed)}", file=sys.stderr)
         raise typer.Exit(2)
     raise typer.Exit(1 if findings else 0)
+
+
+@app.command("compact-snapshots")
+def compact_snapshots_cmd(
+    table: Annotated[
+        list[str],
+        typer.Option("--table", help="Diff-mode table to compact (repeatable)."),
+    ],
+    older_than: str | None = typer.Option(
+        None,
+        "--older-than",
+        help="Only rows older than this: '6 months', '2 weeks', … or an ISO-8601 timestamp.",
+    ),
+    batch_size: int = typer.Option(1000, "--batch-size", help="Objects per committed batch."),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Count rows without changing them."),
+    audit_table: str | None = typer.Option(None, "--audit-table"),
+    dsn: str | None = typer.Option(None, "--db-dsn"),
+    host: str | None = typer.Option(None, "--db-host"),
+    port: int | None = typer.Option(None, "--db-port"),
+    user: str | None = typer.Option(None, "--db-user"),
+    password: str | None = typer.Option(None, "--db-password"),
+    dbname: str | None = typer.Option(None, "--db-name"),
+) -> None:
+    """Clear snapshots of diff-mode tables, keeping the diffs. Exit 0 ok, 2 error."""
+    db_dsn = get_db_dsn(dsn, host, port, user, password, dbname)
+    if not db_dsn:
+        log.error("No database DSN provided")
+        raise typer.Exit(2)
+    resolved = resolve_audit_table(audit_table)
+    try:
+        before = parse_since(older_than, option="--older-than") if older_than else None
+    except ValueError as e:
+        log.error("Invalid --older-than", error=str(e))
+        raise typer.Exit(2) from e
+    failed: list[str] = []
+    cleared = 0
+    try:
+        with connect(dsn=db_dsn, autocommit=True) as conn:
+            for name in table:
+                try:
+                    result = compact_snapshots(
+                        conn,
+                        table=name,
+                        before=before,
+                        batch_size=batch_size,
+                        dry_run=dry_run,
+                        audit_table=resolved,
+                    )
+                except Exception as e:
+                    log.error("Failed to compact snapshots", table=name, error=str(e))
+                    failed.append(name)
+                    continue
+                cleared += result.compacted
+                label = escape(result.table)
+                verb = "would clear" if result.dry_run else "cleared"
+                rich_print(f"{label}: {verb} snapshots of {result.compacted} row(s)")
+                if result.skipped_hashed:
+                    rich_print(
+                        f"{label}: kept {result.skipped_hashed} row(s) covered by the hash chain"
+                    )
+                if result.excluded:
+                    rich_print(
+                        f"[yellow]{label}: kept {len(result.excluded)} object(s) "
+                        "with diff-chain findings[/yellow]"
+                    )
+                    for f in result.excluded[:10]:
+                        column = f" {f.column}" if f.column else ""
+                        line = (
+                            f"{f.table}:{f.object_id} event {f.audit_id} {f.kind}{column}: "
+                            f"{f.detail}"
+                        )
+                        rich_print(f"[yellow]{escape(line)}[/yellow]")
+                    if len(result.excluded) > 10:
+                        rich_print(f"[yellow]… and {len(result.excluded) - 10} more[/yellow]")
+    except Exception as e:
+        log.error("Failed to compact snapshots", error=str(e))
+        raise typer.Exit(2) from e
+    if not dry_run and cleared:
+        rich_print(f"Run VACUUM (ANALYZE) {escape(resolved)} so the freed space is reused.")
+    if failed:
+        print(f"compact-snapshots: failed table(s): {', '.join(failed)}", file=sys.stderr)
+        raise typer.Exit(2)
 
 
 @app.command()
