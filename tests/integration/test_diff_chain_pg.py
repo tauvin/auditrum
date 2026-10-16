@@ -185,6 +185,31 @@ def test_full_mode_history_with_pre_existing_rows_is_clean(items):
     assert verify_diff_chain(items, table="vc_items", full=True) == []
 
 
+def test_pre_062_snapshots_with_excluded_columns_are_clean(items):
+    """Old snapshots hold the excluded column; a save that changed only it wrote no row."""
+    tracked(items, "full")
+    with items.cursor() as cur:
+        cur.execute("INSERT INTO vc_items VALUES (1, 'a', 's2', 0)")
+        cur.execute("DELETE FROM auditlog")
+        cur.execute(
+            "INSERT INTO auditlog (operation, changed_at, object_id, table_name, new_data, diff) "
+            "VALUES ('INSERT', now(), '1', 'vc_items', "
+            """'{"id": 1, "name": "a", "secret": "s", "n": 0}', """
+            """'{"id": {"old": null, "new": 1}, "name": {"old": null, "new": "a"}, """
+            """"n": {"old": null, "new": 0}}'::jsonb)"""
+        )
+        cur.execute("UPDATE vc_items SET name = 'b' WHERE id = 1")
+        cur.execute(
+            "UPDATE auditlog SET old_data = %s::jsonb, new_data = %s::jsonb "
+            "WHERE operation = 'UPDATE' AND table_name = 'vc_items'",
+            (
+                '{"id": 1, "name": "a", "secret": "s2", "n": 0}',
+                '{"id": 1, "name": "b", "secret": "s2", "n": 0}',
+            ),
+        )
+    assert verify_diff_chain(items, table="vc_items", full=True) == []
+
+
 def legacy_row(conn, object_id, diff):
     """Insert a pre-0.4 style UPDATE row whose diff holds only the new values."""
     with conn.cursor() as cur:

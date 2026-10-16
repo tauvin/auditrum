@@ -104,15 +104,22 @@ entries AS (
                      AND (SELECT count(*) FROM jsonb_object_keys(e.diff -> k.key)) = 2
                 ELSE false END AS paired,
            e.diff -> k.key AS d_value,
-           e.old_data -> k.key AS s_old,
-           e.new_data -> k.key AS s_new
+           f.old_data -> k.key AS s_old,
+           f.new_data -> k.key AS s_new
     FROM ev e
+    -- Snapshots before 0.6.2 hold excluded columns too: read them through
+    -- the current field filter, as reconstruction does.
+    CROSS JOIN LATERAL (
+        SELECT _audit_filter_row(e.old_data, spec.s) AS old_data,
+               _audit_filter_row(e.new_data, spec.s) AS new_data
+        FROM spec
+    ) AS f
     CROSS JOIN LATERAL (
         SELECT jsonb_object_keys(e.diff) AS key WHERE jsonb_typeof(e.diff) = 'object'
         UNION
-        SELECT jsonb_object_keys(e.old_data) WHERE jsonb_typeof(e.old_data) = 'object'
+        SELECT jsonb_object_keys(f.old_data) WHERE jsonb_typeof(f.old_data) = 'object'
         UNION
-        SELECT jsonb_object_keys(e.new_data) WHERE jsonb_typeof(e.new_data) = 'object'
+        SELECT jsonb_object_keys(f.new_data) WHERE jsonb_typeof(f.new_data) = 'object'
     ) AS k(key)
 ),
 kv AS (
