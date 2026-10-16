@@ -143,6 +143,48 @@ def test_excluded_column_bypass_is_ignored(items):
     assert verify_diff_chain(items, table="vc_items", full=True) == []
 
 
+def test_full_mode_pre_existing_row_bypass_is_a_live_finding(items):
+    with items.cursor() as cur:
+        cur.execute("INSERT INTO vc_items VALUES (1, 'a', 's', 0)")
+    tracked(items, "full")
+    with items.cursor() as cur:
+        cur.execute("UPDATE vc_items SET n = 5 WHERE id = 1")
+    bypass(items, "UPDATE vc_items SET name = 'zz' WHERE id = 1")
+    [finding] = verify_diff_chain(items, table="vc_items", full=True)
+    assert (finding.object_id, finding.kind, finding.column) == ("1", "live", "name")
+    assert (finding.expected, finding.actual) == ("a", "zz")
+
+
+def test_full_mode_bypass_between_updates_is_a_chain_finding(items):
+    with items.cursor() as cur:
+        cur.execute("INSERT INTO vc_items VALUES (1, 'a', 's', 0)")
+    tracked(items, "full")
+    with items.cursor() as cur:
+        cur.execute("UPDATE vc_items SET n = 5 WHERE id = 1")
+    bypass(items, "UPDATE vc_items SET name = 'zz' WHERE id = 1")
+    with items.cursor() as cur:
+        cur.execute("UPDATE vc_items SET n = 6 WHERE id = 1")
+        cur.execute("SELECT max(id) FROM auditlog")
+        second = cur.fetchone()[0]
+    [finding] = verify_diff_chain(items, table="vc_items", full=True)
+    assert (finding.object_id, finding.kind, finding.column) == ("1", "chain", "name")
+    assert finding.audit_id == second
+    assert (finding.expected, finding.actual) == ("a", "zz")
+
+
+def test_full_mode_history_with_pre_existing_rows_is_clean(items):
+    with items.cursor() as cur:
+        cur.execute("INSERT INTO vc_items VALUES (1, 'a', 's', 0), (2, 'b', 's', 0)")
+    tracked(items, "full")
+    with items.cursor() as cur:
+        cur.execute("UPDATE vc_items SET n = 5 WHERE id = 1")
+        cur.execute("UPDATE vc_items SET name = 'c' WHERE id = 1")
+        cur.execute("UPDATE vc_items SET n = 1 WHERE id = 2")
+        cur.execute("DELETE FROM vc_items WHERE id = 2")
+        cur.execute("INSERT INTO vc_items VALUES (2, 'z', 's', 3)")
+    assert verify_diff_chain(items, table="vc_items", full=True) == []
+
+
 def legacy_row(conn, object_id, diff):
     """Insert a pre-0.4 style UPDATE row whose diff holds only the new values."""
     with conn.cursor() as cur:

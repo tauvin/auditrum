@@ -73,6 +73,7 @@ def write_full_era(conn):
         "INSERT INTO cs_items VALUES (3, 'r', 's', 1)",
         "UPDATE cs_items SET name = 'd' WHERE id = 4",
         "UPDATE cs_items SET n = 9 WHERE id = 2",
+        "UPDATE cs_items SET n = 4 WHERE id = 5",
     ]
     for statement in statements:
         with conn.cursor() as cur:
@@ -95,6 +96,9 @@ def write_diff_era(conn):
 
 
 def full_then_diff(conn):
+    # Object 5 exists before tracking starts, so it never gets an INSERT event.
+    with conn.cursor() as cur:
+        cur.execute("INSERT INTO cs_items VALUES (5, 'p', 's', 0)")
     install(conn, "full")
     stamps = write_full_era(conn)
     install(conn, "diff")
@@ -105,7 +109,7 @@ def full_then_diff(conn):
 def reconstruction(conn, stamps):
     rows = {}
     with conn.cursor() as cur:
-        for object_id in "1234":
+        for object_id in "12345":
             for ts in stamps:
                 cur.execute("SELECT _audit_reconstruct_row('cs_items', %s, %s)", (object_id, ts))
                 rows[("row", object_id, ts)] = cur.fetchone()[0]
@@ -126,14 +130,7 @@ def test_reconstruction_unchanged_after_compaction(items):
     assert result.compacted == full_era_rows
     assert result.excluded == ()
     assert result.skipped_hashed == 0
-    assert (
-        scalar(
-            items,
-            "SELECT count(*) FROM auditlog WHERE table_name = 'cs_items' "
-            "AND (old_data IS NOT NULL OR new_data IS NOT NULL)",
-        )
-        == 0
-    )
+    assert snapshot_count(items) == 0
     assert reconstruction(items, stamps) == before
 
 
@@ -241,3 +238,31 @@ def test_second_run_is_noop(items):
     full_then_diff(items)
     assert compact_snapshots(items, table="cs_items").compacted > 0
     assert compact_snapshots(items, table="cs_items").compacted == 0
+
+
+def test_bypass_on_a_column_no_diff_touched_excludes_the_object(items):
+    with items.cursor() as cur:
+        cur.execute("INSERT INTO cs_items VALUES (1, 'a', 's', 0)")
+    install(items, "full")
+    with items.cursor() as cur:
+        cur.execute("UPDATE cs_items SET n = 5 WHERE id = 1")
+    stamp = now(items)
+    install(items, "diff")
+    bypass(items, "UPDATE cs_items SET name = 'zz' WHERE id = 1")
+    query = "SELECT _audit_reconstruct_row('cs_items', '1', %s)"
+    before = scalar(items, query, (stamp,))
+
+    result = compact_snapshots(items, table="cs_items")
+
+    assert [f.object_id for f in result.excluded] == ["1"]
+    assert result.compacted == 0
+    assert snapshot_count(items, "1") == 1
+    assert scalar(items, query, (stamp,)) == before
+
+
+def test_log_condition_table_is_refused(items):
+    mgr = TriggerManager(PsycopgExecutor(items))
+    mgr.bootstrap()
+    mgr.install(TrackSpec(table="cs_items", storage="full", log_condition="NEW.n > 0"), force=True)
+    with pytest.raises(ValueError):
+        compact_snapshots(items, table="cs_items")

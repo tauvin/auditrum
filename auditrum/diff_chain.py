@@ -5,7 +5,8 @@ went through the audit trigger. Writes that bypass it
 (``session_replication_role = replica``, ``ALTER TABLE ... DISABLE TRIGGER``,
 ``TRUNCATE``, bulk loads) break that silently. The chain is self-checking:
 per object and per column, each event's ``old`` must equal the previous
-event's ``new``, the last event must agree with the live row, and INSERT /
+event's ``new`` (``old`` / ``new`` come from the diff, or from the snapshots
+of full-mode rows, whose diff does not name unchanged columns), the last event must agree with the live row, and INSERT /
 DELETE must alternate with the row's existence. :func:`verify_diff_chain`
 checks exactly that with one set-based query per table and returns the
 first mismatch per object.
@@ -84,32 +85,49 @@ live AS (
     FROM scope sc, spec
 ),
 ev AS (
-    SELECT a.id, a.object_id, a.operation, a.changed_at, a.diff,
+    SELECT a.id, a.object_id, a.operation, a.changed_at, a.diff, a.old_data, a.new_data,
            LAG(a.operation) OVER (PARTITION BY a.object_id ORDER BY a.id) AS prev_op,
            max(a.id) OVER (PARTITION BY a.object_id) AS last_id
     FROM {audit} a JOIN scope sc ON sc.object_id = a.object_id
     WHERE a.table_name = %(table)s
 ),
 entries AS (
-    -- A paired entry is an object with exactly the keys old and new; anything
-    -- else is a pre-0.4 values-only entry that carries just the new value.
-    SELECT e.id, e.object_id, e.changed_at, d.key, d.value,
-           CASE WHEN jsonb_typeof(d.value) = 'object'
-                THEN d.value ?& array['old', 'new']
-                     AND (SELECT count(*) FROM jsonb_object_keys(d.value)) = 2
-                ELSE false END AS paired
+    -- Keys come from the diff and from the snapshots: a full-mode row carries
+    -- every column, so it feeds the chain of columns its diff does not name.
+    -- A paired diff entry is an object with exactly the keys old and new;
+    -- any other diff entry is a pre-0.4 values-only entry with just the new
+    -- value. Without a diff entry the snapshot value is used. -> yields SQL
+    -- NULL only for a missing key, a JSON null stays jsonb 'null'.
+    SELECT e.id, e.object_id, e.changed_at, k.key,
+           CASE WHEN jsonb_typeof(e.diff -> k.key) = 'object'
+                THEN (e.diff -> k.key) ?& array['old', 'new']
+                     AND (SELECT count(*) FROM jsonb_object_keys(e.diff -> k.key)) = 2
+                ELSE false END AS paired,
+           e.diff -> k.key AS d_value,
+           e.old_data -> k.key AS s_old,
+           e.new_data -> k.key AS s_new
     FROM ev e
-    CROSS JOIN LATERAL jsonb_each(e.diff) AS d(key, value)
+    CROSS JOIN LATERAL (
+        SELECT jsonb_object_keys(e.diff) AS key WHERE jsonb_typeof(e.diff) = 'object'
+        UNION
+        SELECT jsonb_object_keys(e.old_data) WHERE jsonb_typeof(e.old_data) = 'object'
+        UNION
+        SELECT jsonb_object_keys(e.new_data) WHERE jsonb_typeof(e.new_data) = 'object'
+    ) AS k(key)
 ),
 kv AS (
-    SELECT n.id, n.object_id, n.changed_at, n.key, n.paired,
-           CASE WHEN n.paired THEN n.value -> 'old' END AS old_v,
-           CASE WHEN n.paired THEN n.value -> 'new' ELSE n.value END AS new_v,
-           LAG(CASE WHEN n.paired THEN n.value -> 'new' ELSE n.value END) OVER w AS prev_new,
+    SELECT n.id, n.object_id, n.changed_at, n.key,
+           x.old_v, x.new_v,
+           LAG(x.new_v) OVER w AS prev_new,
            LAG(n.id) OVER w AS prev_id,
            row_number() OVER (PARTITION BY n.object_id, n.key ORDER BY n.id DESC) AS rn_desc,
            COALESCE(c.is_tstz, false) AS is_tstz
     FROM entries n
+    CROSS JOIN LATERAL (
+        SELECT CASE WHEN n.paired THEN n.d_value -> 'old' ELSE n.s_old END AS old_v,
+               CASE WHEN n.paired THEN n.d_value -> 'new'
+                    ELSE COALESCE(n.d_value, n.s_new) END AS new_v
+    ) AS x
     LEFT JOIN cols c ON c.key = n.key
     WINDOW w AS (PARTITION BY n.object_id, n.key ORDER BY n.id)
 ),
@@ -120,7 +138,7 @@ mismatches AS (
            format('old value of %%s differs from event %%s', k.key, k.prev_id) AS detail,
            k.changed_at
     FROM kv k
-    WHERE k.paired AND k.prev_id IS NOT NULL
+    WHERE k.old_v IS NOT NULL AND k.prev_id IS NOT NULL AND k.prev_new IS NOT NULL
       AND CASE WHEN k.is_tstz
                     AND jsonb_typeof(k.old_v) = 'string' AND jsonb_typeof(k.prev_new) = 'string'
                THEN (k.old_v #>> '{{}}')::timestamptz IS DISTINCT FROM (k.prev_new #>> '{{}}')::timestamptz
