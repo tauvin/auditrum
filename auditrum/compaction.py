@@ -119,7 +119,9 @@ def compact_snapshots(
             f"table {table!r} is not in diff storage mode; switch it to storage='diff' first"
         )
 
-    excluded = tuple(verify_diff_chain(conn, table=table, full=True, audit_table=audit_table))
+    excluded = tuple(
+        verify_diff_chain(conn, table=table, full=True, snapshots=True, audit_table=audit_table)
+    )
     params = {
         "table": table,
         "before": before,
