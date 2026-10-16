@@ -266,3 +266,90 @@ def test_log_condition_table_is_refused(items):
     mgr.install(TrackSpec(table="cs_items", storage="full", log_condition="NEW.n > 0"), force=True)
     with pytest.raises(ValueError):
         compact_snapshots(items, table="cs_items")
+
+
+def raw_snapshot_history(conn, operation):
+    """A pre-0.6.2 history under only("name"): the snapshots also hold n.
+
+    The trigger of that time stored to_jsonb(OLD) / to_jsonb(NEW) unfiltered;
+    the snapshots are patched to that form. The filter is then widened to
+    (name, n) and the table switched to diff mode.
+    """
+    mgr = TriggerManager(PsycopgExecutor(conn))
+    mgr.bootstrap()
+    mgr.install(
+        TrackSpec(table="cs_items", fields=FieldFilter.only("name"), storage="full"), force=True
+    )
+    with conn.cursor() as cur:
+        cur.execute("INSERT INTO cs_items VALUES (1, 'a', 's', 0)")
+    stamp = now(conn)
+    with conn.cursor() as cur:
+        cur.execute(
+            "UPDATE auditlog SET new_data = %s::jsonb WHERE operation = 'INSERT'",
+            ('{"id": 1, "name": "a", "secret": "s", "n": 0}',),
+        )
+        if operation == "UPDATE":
+            cur.execute("UPDATE cs_items SET name = 'b', n = 5 WHERE id = 1")
+            new_data = '{"id": 1, "name": "b", "secret": "s", "n": 5}'
+        else:
+            cur.execute("DELETE FROM cs_items WHERE id = 1")
+            new_data = None
+        cur.execute(
+            "UPDATE auditlog SET old_data = %s::jsonb, new_data = %s::jsonb "
+            "WHERE operation = %s RETURNING id",
+            ('{"id": 1, "name": "a", "secret": "s", "n": 0}', new_data, operation),
+        )
+        audit_id = cur.fetchone()[0]
+    mgr.install(
+        TrackSpec(table="cs_items", fields=FieldFilter.only("name", "n"), storage="diff"),
+        force=True,
+    )
+    return stamp, audit_id
+
+
+def test_snapshot_change_missing_from_the_diff_excludes_the_object(items):
+    stamp, audit_id = raw_snapshot_history(items, "UPDATE")
+    with items.cursor() as cur:
+        cur.execute("UPDATE cs_items SET name = 'c' WHERE id = 1")
+    query = "SELECT _audit_reconstruct_row('cs_items', '1', %s)"
+    before = scalar(items, query, (stamp,))
+    held = snapshot_count(items, "1")
+
+    result = compact_snapshots(items, table="cs_items")
+
+    [finding] = result.excluded
+    assert (finding.object_id, finding.audit_id, finding.kind) == ("1", audit_id, "chain")
+    assert (finding.column, finding.expected, finding.actual) == ("n", 0, 5)
+    assert "diff does not" in finding.detail
+    assert result.compacted == 0
+    assert snapshot_count(items, "1") == held
+    assert scalar(items, query, (stamp,)) == before
+
+
+def test_deleted_snapshot_column_missing_from_the_diff_excludes_the_object(items):
+    stamp, audit_id = raw_snapshot_history(items, "DELETE")
+    query = "SELECT _audit_reconstruct_row('cs_items', '1', %s)"
+    before = scalar(items, query, (stamp,))
+    held = snapshot_count(items, "1")
+
+    result = compact_snapshots(items, table="cs_items", dry_run=True)
+    [finding] = result.excluded
+    assert (finding.object_id, finding.audit_id, finding.column) == ("1", audit_id, "n")
+    assert (finding.expected, finding.actual) == (0, None)
+    assert result.compacted == 0
+
+    compact_snapshots(items, table="cs_items")
+    assert snapshot_count(items, "1") == held
+    assert scalar(items, query, (stamp,)) == before
+
+
+def test_findings_from_every_batch_are_reported(items):
+    full_then_diff(items)
+    bypass(items, "UPDATE cs_items SET name = 'zz' WHERE id IN (2, 4)")
+
+    result = compact_snapshots(items, table="cs_items", batch_size=1)
+
+    assert [f.object_id for f in result.excluded] == ["2", "4"]
+    assert snapshot_count(items, "1") == snapshot_count(items, "3") == 0
+    assert snapshot_count(items, "2") > 0
+    assert snapshot_count(items, "4") > 0
