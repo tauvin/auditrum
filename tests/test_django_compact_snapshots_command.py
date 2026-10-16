@@ -74,7 +74,7 @@ class TestAuditrumCompactSnapshots:
         assert "items: kept 2 row(s) covered by the hash chain" in text
         assert "Run VACUUM (ANALYZE) auditlog" in text
         kwargs = mock.call_args.kwargs
-        assert kwargs["before"] is None and kwargs["batch_size"] == 10_000
+        assert kwargs["before"] is None and kwargs["batch_size"] == 1000
         assert kwargs["dry_run"] is False and kwargs["audit_table"] == "auditlog"
 
     def test_dry_run_has_no_vacuum_hint(self):
@@ -142,7 +142,7 @@ class TestAuditrumCompactSnapshots:
     def test_bad_older_than_raises(self):
         with (
             patch(f"{MODULE}.compact_snapshots") as mock,
-            pytest.raises(CommandError),
+            pytest.raises(CommandError, match="invalid --older-than value 'soon'"),
         ):
             call_command("auditrum_compact_snapshots", "--table", "items", "--older-than", "soon")
         mock.assert_not_called()

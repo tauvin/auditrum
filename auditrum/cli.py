@@ -478,7 +478,7 @@ def compact_snapshots_cmd(
         "--older-than",
         help="Only rows older than this: '6 months', '2 weeks', … or an ISO-8601 timestamp.",
     ),
-    batch_size: int = typer.Option(10_000, "--batch-size", help="Rows per committed batch."),
+    batch_size: int = typer.Option(1000, "--batch-size", help="Objects per committed batch."),
     dry_run: bool = typer.Option(False, "--dry-run", help="Count rows without changing them."),
     audit_table: str | None = typer.Option(None, "--audit-table"),
     dsn: str | None = typer.Option(None, "--db-dsn"),
@@ -495,7 +495,7 @@ def compact_snapshots_cmd(
         raise typer.Exit(2)
     resolved = resolve_audit_table(audit_table)
     try:
-        before = parse_since(older_than) if older_than else None
+        before = parse_since(older_than, option="--older-than") if older_than else None
     except ValueError as e:
         log.error("Invalid --older-than", error=str(e))
         raise typer.Exit(2) from e

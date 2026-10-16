@@ -317,11 +317,12 @@ def _decode(value: str | None) -> Any:
     return None if value is None else json.loads(value)
 
 
-def parse_since(value: str) -> datetime:
+def parse_since(value: str, *, option: str = "--since") -> datetime:
     """Turn ``'1 day'`` / ``'2 weeks'`` or an ISO-8601 timestamp into a UTC datetime.
 
     Intervals use the ``purge --older-than`` format and are subtracted from
-    now; a naive ISO timestamp is taken as UTC.
+    now; a naive ISO timestamp is taken as UTC. ``option`` names the option
+    in the error message.
     """
     try:
         parsed = datetime.fromisoformat(value)
@@ -330,7 +331,7 @@ def parse_since(value: str) -> datetime:
             return datetime.now(UTC) - _parse_interval(value)
         except ValueError:
             raise ValueError(
-                f"invalid --since value {value!r}: use e.g. '1 day', '2 weeks' "
+                f"invalid {option} value {value!r}: use e.g. '1 day', '2 weeks' "
                 "or an ISO-8601 timestamp"
             ) from None
     if parsed.tzinfo is None:

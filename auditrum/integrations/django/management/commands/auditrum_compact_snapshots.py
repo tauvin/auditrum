@@ -39,7 +39,7 @@ class Command(BaseCommand):
             help="Only rows older than this: '6 months', '2 weeks', … or ISO-8601.",
         )
         parser.add_argument(
-            "--batch-size", type=int, default=10_000, help="Rows per committed batch."
+            "--batch-size", type=int, default=1000, help="Objects per committed batch."
         )
         parser.add_argument("--dry-run", action="store_true", help="Count rows without changing.")
         parser.add_argument("--audit-table", help="Audit table (default: from settings).")
@@ -47,7 +47,11 @@ class Command(BaseCommand):
     def handle(self, *args: Any, **options: Any) -> None:
         audit_table = options["audit_table"] or audit_settings.table_name
         try:
-            before = parse_since(options["older_than"]) if options["older_than"] else None
+            before = (
+                parse_since(options["older_than"], option="--older-than")
+                if options["older_than"]
+                else None
+            )
         except ValueError as exc:
             raise CommandError(str(exc)) from exc
 

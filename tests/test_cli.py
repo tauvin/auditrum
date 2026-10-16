@@ -205,6 +205,7 @@ class TestCompactSnapshotsCommand:
     def test_bad_older_than_exits_two(self):
         result, compact = self._invoke(["--table", "items", "--older-than", "bogus"])
         assert result.exit_code == 2
+        assert "invalid --older-than value 'bogus'" in result.output
         compact.assert_not_called()
 
     def test_success(self):
@@ -213,7 +214,7 @@ class TestCompactSnapshotsCommand:
         assert "items: cleared snapshots of 3 row(s)" in result.output
         assert "VACUUM (ANALYZE) auditlog" in result.output
         assert self.connect.call_args.kwargs["autocommit"] is True
-        assert compact.call_args.kwargs["batch_size"] == 10_000
+        assert compact.call_args.kwargs["batch_size"] == 1000
         assert compact.call_args.kwargs["before"] is None
 
     def test_dry_run(self):

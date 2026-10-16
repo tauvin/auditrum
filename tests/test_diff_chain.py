@@ -120,3 +120,7 @@ class TestParseSince:
     def test_garbage(self):
         with pytest.raises(ValueError, match="invalid --since value 'yesterday-ish'.*ISO-8601"):
             parse_since("yesterday-ish")
+
+    def test_option_names_the_option_in_the_error(self):
+        with pytest.raises(ValueError, match="invalid --older-than value 'soon'"):
+            parse_since("soon", option="--older-than")
