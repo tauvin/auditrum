@@ -476,18 +476,78 @@ python manage.py auditrum_makemigrations
 python manage.py migrate
 ```
 
-Rows already in `auditlog` keep their snapshots. Reconstruction decides
+Rows already in `auditlog` keep their snapshots; to clear them see
+[Clearing old snapshots](#clearing-old-snapshots). Reconstruction decides
 per row, so a history that starts as `full` and continues as `diff`
 reads correctly; see [Time travel](time-travel.md#how-it-works). The
 switch is reversible the same way. It cannot be combined with
 `log_condition`.
 
-## Shrinking old partitions
+## Clearing old snapshots
 
-Switching modes does not rewrite existing rows. To reclaim the space of
-old snapshots for the diff tables, copy a month partition without
-`old_data` / `new_data`. The example assumes a partition `p` that no
-writer touches any more; do it inside a maintenance window.
+Switching modes does not rewrite existing rows, and the snapshots of the
+old rows are most of the audit log's size. `compact-snapshots` clears
+them in place, while the application keeps running. Look first, then run:
+
+```bash
+auditrum compact-snapshots --table orders --dry-run
+auditrum compact-snapshots --table orders --table invoices --older-than '6 months'
+```
+
+```sql
+VACUUM (ANALYZE) auditlog;
+```
+
+For the `orders` table the dry run prints
+`orders: would clear snapshots of N row(s)`; the real run prints
+`cleared`. Django: `python manage.py auditrum_compact_snapshots --table orders`.
+Options are in the [CLI reference](cli.md#compact-snapshots).
+
+Reconstruction reads a cleared row like a diff-only one, so past states
+stay the same. The command leaves a row or object alone when clearing it
+would lose information:
+
+- Objects with a [diff chain](diff-chain.md) finding are kept whole and
+  reported (up to 10 of them). While snapshots exist, reconstruction is
+  right even across a trigger bypass; without them only the diff chain
+  is left, so these objects are not touched.
+- Rows covered by the hash chain are kept and counted: the hash was
+  computed over the snapshots.
+- Rows written before 0.4 (values-only `diff`) are kept.
+
+Only `storage="diff"` tables are accepted. Each batch of `--batch-size`
+rows (default 10000) is one `UPDATE`. The CLI and a Django command
+outside `atomic()` commit every batch, so a long run does not hold one
+big transaction or lock; inside a transaction the whole run is one. A
+second run finds nothing to do.
+
+The caller needs `UPDATE` on the audit table (under
+[hardening](hardening.md) that is the admin role, not the app role) and
+the privileges `verify-diff-chain` needs.
+
+Limits to know before running it:
+
+- Past states now come from diffs, so the diff-mode limits apply to the
+  old history too. If the field filter changed over time, reconstructed
+  past states use the current filter. A column added after the snapshots
+  were written appears in past states with its current value; a dropped
+  column disappears from them.
+- Snapshots written before 0.6.2 contain excluded columns. The check
+  reads snapshots through the current field filter, and after
+  compaction those columns no longer appear in reconstructed past
+  states.
+- Tables with `log_condition` are refused.
+- A bypass between the check and the update is not caught. Run it when
+  no bulk load is running.
+- Disk files do not shrink. `VACUUM` lets new rows reuse the freed
+  space; to return it to the OS see below.
+
+### Returning the space to the OS
+
+`pg_repack` rewrites a table or partition online and gives the space back.
+Without it, copy a month partition without `old_data` / `new_data`. The
+example assumes a partition `p` that no writer touches any more; do it
+inside a maintenance window.
 
 ```sql
 BEGIN;

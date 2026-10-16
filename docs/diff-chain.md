@@ -26,7 +26,10 @@ see the [hash chain](hardening.md#hash-chain-for-tamper-detection).
 
 Per object, and per column that is not excluded by the field filter
 (excluded columns are never compared). It works for full and diff
-tables alike. Each finding has one of three kinds, and only the first
+tables alike. Snapshot values (`old_data` / `new_data`, read through the
+current field filter) are compared along with the diffs, so a bypass on a
+column that no diff ever touched, such as a row that existed before
+tracking was installed, is found too. Each finding has one of three kinds, and only the first
 finding per object (the one with the lowest event id) is reported.
 
 **`chain`** — an event's `old` value differs from the `new` value of the

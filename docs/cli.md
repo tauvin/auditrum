@@ -215,7 +215,8 @@ Good candidate for a nightly cron that alerts on failure.
 Find writes that bypassed the audit trigger: per object and column, each
 event's `old` must match the previous event's `new`, the last event must
 match the live row, and INSERT / DELETE must match the row's existence.
-Full guide in [`diff-chain.md`](diff-chain.md).
+Snapshot values count too, so columns that no diff ever touched are
+checked as well. Full guide in [`diff-chain.md`](diff-chain.md).
 
 ```bash
 # Objects with events in the last day (default window)
@@ -242,6 +243,34 @@ Prints one finding per object (the first by event id). Exit 0 when
 clean, 1 with findings, 2 on error. With no registered tables it exits
 2 because nothing was checked. A table that cannot be checked is
 reported and skipped; the others are still checked, and the run exits 2.
+
+### `compact-snapshots`
+
+Clear `old_data` / `new_data` of rows written before a table was switched
+to `storage="diff"`, keeping the diffs, online and in batches. Objects with
+[diff chain](diff-chain.md) findings, rows covered by the hash chain and
+pre-0.4 rows are kept. Guide and limits:
+[Clearing old snapshots](migration-cookbook.md#clearing-old-snapshots).
+
+```bash
+auditrum compact-snapshots --table orders --dry-run
+auditrum compact-snapshots --table orders --table invoices --older-than '6 months'
+```
+
+| Option | Meaning |
+|---|---|
+| `--table T` | Diff-mode table, required, repeatable. There is no "all tables". |
+| `--older-than` | Only rows older than this: `'6 months'`, … or ISO-8601. |
+| `--batch-size N` | Rows per committed batch. Default 10000. |
+| `--dry-run` | Count rows without changing them. |
+| `--audit-table`, `--db-*` | As for the other commands. |
+
+Prints, per table, the rows cleared (`would clear` on `--dry-run`), the
+rows kept because of the hash chain, and the objects kept because of
+chain findings (the first 10). After a run that cleared rows it reminds
+you to run `VACUUM (ANALYZE)` on the audit table. Exit 0 on success
+(findings are reported, not failures), 2 when a table failed; the other
+tables are still processed. Needs `UPDATE` on the audit table.
 
 ---
 

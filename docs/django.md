@@ -508,6 +508,23 @@ every registered table is checked; with no registered tables it raises
 checked is reported and skipped, and the command raises `CommandError`
 naming it after checking the others. See [Diff chain check](diff-chain.md).
 
+### Clearing old snapshots
+
+`auditrum_compact_snapshots` clears `old_data` / `new_data` of rows written
+before a table was switched to `storage="diff"`, keeping the diffs. It runs
+on the default connection; batches commit separately outside `atomic()`.
+
+```bash
+python manage.py auditrum_compact_snapshots --table orders --dry-run
+python manage.py auditrum_compact_snapshots --table orders --older-than '6 months'
+```
+
+Options: `--table` (required, repeatable), `--older-than`, `--batch-size`
+(default 10000), `--dry-run`, `--audit-table`. A table that fails is
+reported and skipped, and the command raises `CommandError` naming it
+after the others. What is kept, the limits and the `VACUUM` step:
+[Clearing old snapshots](migration-cookbook.md#clearing-old-snapshots).
+
 ## Tips and gotchas
 
 - **Tracked models must have a `pk`.** Composite primary keys are not
