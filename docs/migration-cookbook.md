@@ -504,22 +504,29 @@ For the `orders` table the dry run prints
 Options are in the [CLI reference](cli.md#compact-snapshots).
 
 Reconstruction reads a cleared row like a diff-only one, so past states
-stay the same. The command leaves a row or object alone when clearing it
-would lose information:
+stay the same. The table is processed `--batch-size` objects at a time
+(default 1000). Each batch is first checked with the
+[diff chain](diff-chain.md), with snapshot values included, so columns
+that no diff ever touched are compared too. The command leaves a row or
+object alone when clearing it would lose information:
 
-- Objects with a [diff chain](diff-chain.md) finding are kept whole and
-  reported (up to 10 of them). While snapshots exist, reconstruction is
-  right even across a trigger bypass; without them only the diff chain
-  is left, so these objects are not touched.
+- Objects with a diff chain finding are kept whole and reported (up to
+  10 of them). While snapshots exist, reconstruction is right even across
+  a trigger bypass; without them only the diff chain is left.
+- Objects with a snapshot that records a change of a column the diff does
+  not are kept and reported the same way. Snapshots written before 0.6.2
+  under a narrower field filter can do that; reconstruction from the diff
+  alone would lose the change.
 - Rows covered by the hash chain are kept and counted: the hash was
   computed over the snapshots.
-- Rows written before 0.4 (values-only `diff`) are kept.
+- Rows without a fully paired `{old, new}` diff (pre-0.4 rows, rows with
+  no diff) keep their snapshots.
 
-Only `storage="diff"` tables are accepted. Each batch of `--batch-size`
-rows (default 10000) is one `UPDATE`. The CLI and a Django command
-outside `atomic()` commit every batch, so a long run does not hold one
-big transaction or lock; inside a transaction the whole run is one. A
-second run finds nothing to do.
+Only `storage="diff"` tables are accepted. After its check each batch is
+cleared with one `UPDATE`. The CLI and a Django command outside
+`atomic()` commit every batch, so a long run does not hold one big
+transaction or lock; inside a transaction the whole run is one. A second
+run finds nothing to do.
 
 The caller needs `UPDATE` on the audit table (under
 [hardening](hardening.md) that is the admin role, not the app role) and
@@ -536,6 +543,14 @@ Limits to know before running it:
   reads snapshots through the current field filter, and after
   compaction those columns no longer appear in reconstructed past
   states.
+- `tstzrange` and `timestamptz[]` values are compared as text, which
+  depends on the session `TimeZone` of the write. Objects whose history
+  was written under different time zones can be kept although nothing is
+  wrong with them (plain `timestamptz` columns are compared by value).
+- Each batch reads the full history of its objects, snapshots included,
+  so a run costs about one pass over the table's audit rows plus the
+  check. With `jit` on, each batch also pays the JIT compile of the
+  check; a larger `--batch-size` spreads it.
 - Tables with `log_condition` are refused.
 - A bypass between the check and the update is not caught. Run it when
   no bulk load is running.

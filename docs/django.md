@@ -512,7 +512,9 @@ naming it after checking the others. See [Diff chain check](diff-chain.md).
 
 `auditrum_compact_snapshots` clears `old_data` / `new_data` of rows written
 before a table was switched to `storage="diff"`, keeping the diffs. It runs
-on the default connection; batches commit separately outside `atomic()`.
+on the default connection. Run it outside `atomic()`: there every batch
+commits separately, while inside it a table that fails aborts the
+transaction and every later table fails too.
 
 ```bash
 python manage.py auditrum_compact_snapshots --table orders --dry-run
@@ -520,7 +522,7 @@ python manage.py auditrum_compact_snapshots --table orders --older-than '6 month
 ```
 
 Options: `--table` (required, repeatable), `--older-than`, `--batch-size`
-(default 10000), `--dry-run`, `--audit-table`. A table that fails is
+(objects per batch, default 1000), `--dry-run`, `--audit-table`. A table that fails is
 reported and skipped, and the command raises `CommandError` naming it
 after the others. What is kept, the limits and the `VACUUM` step:
 [Clearing old snapshots](migration-cookbook.md#clearing-old-snapshots).
