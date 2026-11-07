@@ -8,6 +8,7 @@ a stubbed ``execute`` callback.
 import uuid
 
 import pytest
+from psycopg import sql as pg_sql
 
 django = pytest.importorskip("django")
 
@@ -252,6 +253,32 @@ class TestInjectAuditContext:
             _inject_audit_context(execute, "SELECT 1", (), False, _make_context())
         assert captured["sql"] == "SELECT 1"
         assert "set_config" not in captured["sql"]
+
+    def test_composed_ignored_statement_passes_through(self):
+        """``drop_old_partitions`` builds its statements with ``psycopg.sql``.
+
+        Inside a context (every Celery task runs in one) the wrapper used to
+        call ``.strip()`` on the ``Composed`` object and fail before any
+        statement ran, so the retention task never dropped a partition.
+        """
+        execute, captured = self._captured_execute()
+        statement = pg_sql.SQL("DROP TABLE IF EXISTS {}").format(
+            pg_sql.Identifier("auditlog_p2025_05")
+        )
+        with auditrum_context(user_id=1):
+            result = _inject_audit_context(execute, statement, (), False, _make_context())
+        assert result == "ok"
+        assert captured["sql"] is statement
+
+    def test_composed_write_gets_the_context(self):
+        """A write composed with ``psycopg.sql`` is tracked like a string one."""
+        execute, captured = self._captured_execute()
+        statement = pg_sql.SQL("DELETE FROM {} WHERE id = %s").format(pg_sql.Identifier("users"))
+        with auditrum_context(user_id=1):
+            _inject_audit_context(execute, statement, (7,), False, _make_context())
+        assert captured["sql"].count("set_config(%s, %s, true)") == 2
+        assert captured["sql"].endswith('DELETE FROM "users" WHERE id = %s')
+        assert captured["params"][-1] == 7
 
     def test_skips_injection_for_named_cursor(self):
         execute, captured = self._captured_execute()
