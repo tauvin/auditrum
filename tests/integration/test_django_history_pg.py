@@ -252,6 +252,37 @@ def test_insert_returning_inside_context_returns_real_id(fresh_auditlog, configu
     assert row_id > 0
 
 
+def test_drop_old_partitions_through_django_inside_context(fresh_auditlog, configured_django):
+    """Retention run the way a scheduled Celery task runs it.
+
+    ``drop_old_partitions`` builds its statements with ``psycopg.sql``.
+    Through Django's connection inside an active context — every task
+    runs in one — the wrapper used to call ``.strip()`` on the
+    ``Composed`` statement and fail before the first query, so the
+    monthly purge never dropped a partition. The existing retention test
+    passes a bare psycopg connection and never met the wrapper.
+    """
+    from django.db import connection as django_conn
+
+    from auditrum.integrations.django.runtime import auditrum_context
+    from auditrum.retention import drop_old_partitions
+
+    conn = fresh_auditlog
+    with conn.cursor() as cur:
+        cur.execute(
+            "CREATE TABLE IF NOT EXISTS auditlog_p2020_01 PARTITION OF auditlog "
+            "FOR VALUES FROM ('2020-01-01') TO ('2020-02-01')"
+        )
+
+    with auditrum_context(source="retention-test"):
+        dropped = drop_old_partitions(django_conn, "auditlog", "365 days")
+
+    assert "auditlog_p2020_01" in dropped
+    with conn.cursor() as cur:
+        cur.execute("SELECT to_regclass('auditlog_p2020_01')")
+        assert cur.fetchone()[0] is None
+
+
 def test_django_orm_create_inside_context_has_int_pk(fresh_auditlog, configured_django):
     """End-to-end: the same bug at the Django ORM layer.
 

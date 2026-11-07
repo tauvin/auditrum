@@ -44,6 +44,7 @@ from types import MappingProxyType
 from typing import TYPE_CHECKING, Any
 
 from django.db import connection, transaction
+from psycopg.sql import Composable
 
 from auditrum.integrations.django.settings import audit_settings
 
@@ -173,7 +174,7 @@ def _can_inject_variable(cursor: Any, sql: str | bytes) -> bool:
 
 def _inject_audit_context(
     execute: _ExecuteCallable,
-    sql: str | bytes,
+    sql: str | bytes | Composable,
     params: Any,
     many: bool,
     context: dict[str, Any],
@@ -197,13 +198,22 @@ def _inject_audit_context(
     short-circuits before any SQL is rewritten, so the wrapper
     costs one dict lookup per query outside an active
     :class:`auditrum_context` block.
+
+    ``sql`` may also be a ``psycopg.sql.Composable`` — auditrum's own
+    :func:`~auditrum.retention.drop_old_partitions` builds its statements
+    that way. It is rendered against the query's connection before the
+    prefix checks; an ignored statement still reaches ``execute`` as the
+    original object, a tracked write is prefixed like a string one.
     """
     tracker = _tracker.get()
     if tracker is None:
         return execute(sql, params, many, context)
 
     is_bytes = isinstance(sql, bytes)
-    sql_str = sql.decode() if is_bytes else sql
+    if isinstance(sql, Composable):
+        sql_str = sql.as_string(getattr(context.get("connection"), "connection", None))
+    else:
+        sql_str = sql.decode() if is_bytes else sql
 
     if not _can_inject_variable(context["cursor"], sql_str):
         return execute(sql, params, many, context)

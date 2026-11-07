@@ -8,6 +8,18 @@ the API stabilises.
 
 ## [Unreleased]
 
+### Fixed
+
+- **Retention inside an audit context.** ``drop_old_partitions`` passes
+  ``psycopg.sql.Composed`` statements to ``cursor.execute``, and the
+  Django execute wrapper called ``.strip()`` on them, raising
+  ``AttributeError`` on the first query whenever an ``auditrum_context``
+  was active. Every Celery task runs in one, so a scheduled purge failed
+  before dropping anything. The wrapper now renders ``Composable``
+  statements against the query's connection before its checks: ignored
+  statements still reach the driver unchanged, writes composed with
+  ``psycopg.sql`` get the context like string ones.
+
 ## [0.9.0] — 2026-10-16
 
 ### Added
