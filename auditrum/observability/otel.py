@@ -9,12 +9,18 @@ direct join between distributed traces and database-side audit events.
 
 Design rule: **never raise**. If ``opentelemetry`` is not installed or
 there's no active span, the enrichment is a no-op. Users with no OTel
-setup pay zero runtime cost beyond a Python-level ImportError catch.
+setup pay nothing at runtime: the import is attempted once, when this
+module loads, never on the request path.
 """
 
 from __future__ import annotations
 
 from typing import Any
+
+try:
+    from opentelemetry import trace
+except ImportError:
+    trace = None
 
 __all__ = ["enrich_metadata"]
 
@@ -26,9 +32,7 @@ def enrich_metadata(metadata: dict[str, Any]) -> dict[str, Any]:
     ``trace_id`` / ``span_id`` values are preserved — manual assignment
     takes precedence over the auto-enrichment.
     """
-    try:
-        from opentelemetry import trace
-    except ImportError:
+    if trace is None:
         return metadata
 
     try:
