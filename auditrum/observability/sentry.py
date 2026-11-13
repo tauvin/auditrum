@@ -11,6 +11,11 @@ from __future__ import annotations
 import contextlib
 from typing import Any
 
+try:
+    import sentry_sdk
+except ImportError:
+    sentry_sdk = None
+
 __all__ = ["add_breadcrumb_for_context"]
 
 
@@ -21,9 +26,7 @@ def add_breadcrumb_for_context(metadata: dict[str, Any], *, category: str = "aud
     copied into the breadcrumb ``data`` payload verbatim — filter it
     yourself before calling if it contains PII you don't want in Sentry.
     """
-    try:
-        import sentry_sdk
-    except ImportError:
+    if sentry_sdk is None:
         return
 
     # Never let observability break the app

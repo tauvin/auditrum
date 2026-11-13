@@ -43,10 +43,13 @@ from dataclasses import dataclass, field
 from types import MappingProxyType
 from typing import TYPE_CHECKING, Any
 
+import psycopg.pq
 from django.db import connection, transaction
 from psycopg.sql import Composable
 
 from auditrum.integrations.django.settings import audit_settings
+from auditrum.observability.otel import enrich_metadata
+from auditrum.observability.sentry import add_breadcrumb_for_context
 
 if TYPE_CHECKING:
     from django.db.backends.base.base import BaseDatabaseWrapper
@@ -156,8 +159,6 @@ def _is_ignored_statement(sql: str | bytes) -> bool:
 
 def _is_transaction_errored(cursor: Any) -> bool:
     try:
-        import psycopg.pq
-
         return cursor.connection.info.transaction_status == psycopg.pq.TransactionStatus.INERROR
     except Exception:
         return False
@@ -352,9 +353,6 @@ class auditrum_context(contextlib.ContextDecorator):
 
             # Auto-enrich with OTel trace context + optional Sentry breadcrumb.
             # Both are soft deps and no-op when the libraries aren't installed.
-            from auditrum.observability.otel import enrich_metadata
-            from auditrum.observability.sentry import add_breadcrumb_for_context
-
             enrich_metadata(metadata)
             add_breadcrumb_for_context(metadata)
 

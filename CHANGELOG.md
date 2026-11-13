@@ -8,6 +8,19 @@ the API stabilises.
 
 ## [Unreleased]
 
+### Fixed
+
+- **Import deadlock on the first audit contexts of a worker.**
+  ``auditrum_context.__enter__`` imported the observability helpers, and
+  they imported ``opentelemetry`` / ``sentry_sdk`` on every call. Threads
+  entering their first context at once (a fresh WSGI/ASGI worker under
+  load) raced on those imports and could fail with
+  ``importlib._bootstrap._DeadlockError``. The helpers now resolve their
+  soft dependencies once, when the module loads, and the runtime imports
+  them at module level, so nothing is imported on the request path.
+  Projects that preloaded ``auditrum.observability`` as a workaround can
+  drop it.
+
 ## [0.9.1] — 2026-11-07
 
 ### Fixed

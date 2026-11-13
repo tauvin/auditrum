@@ -2,22 +2,26 @@
 
 All three libraries are soft deps: the helpers must gracefully no-op
 when they're not installed, and must correctly pick up state when they
-are. We mock the modules via ``sys.modules`` injection where needed.
+are. Each helper resolves its library once, at import, into a module
+attribute; the tests swap that attribute for a fake or ``None``.
 """
 
+import importlib.util
+import subprocess
 import sys
 from types import ModuleType
 from unittest.mock import MagicMock
 
 import pytest
 
+from auditrum.observability import otel, sentry
 from auditrum.observability.otel import enrich_metadata
 from auditrum.observability.sentry import add_breadcrumb_for_context
 
 
 class TestOtelEnrichment:
     def test_noop_without_opentelemetry(self, monkeypatch):
-        monkeypatch.setitem(sys.modules, "opentelemetry", None)
+        monkeypatch.setattr(otel, "trace", None)
         meta: dict = {"source": "http"}
         result = enrich_metadata(meta)
         assert result is meta
@@ -36,10 +40,7 @@ class TestOtelEnrichment:
         fake_span.get_span_context.return_value = FakeCtx()
         fake_trace.get_current_span = lambda: fake_span
 
-        fake_otel = ModuleType("opentelemetry")
-        fake_otel.trace = fake_trace
-        monkeypatch.setitem(sys.modules, "opentelemetry", fake_otel)
-        monkeypatch.setitem(sys.modules, "opentelemetry.trace", fake_trace)
+        monkeypatch.setattr(otel, "trace", fake_trace)
 
         meta: dict = {}
         enrich_metadata(meta)
@@ -58,10 +59,7 @@ class TestOtelEnrichment:
         span.get_span_context.return_value = InvalidCtx()
         fake_trace.get_current_span = lambda: span
 
-        fake_otel = ModuleType("opentelemetry")
-        fake_otel.trace = fake_trace
-        monkeypatch.setitem(sys.modules, "opentelemetry", fake_otel)
-        monkeypatch.setitem(sys.modules, "opentelemetry.trace", fake_trace)
+        monkeypatch.setattr(otel, "trace", fake_trace)
 
         meta: dict = {}
         enrich_metadata(meta)
@@ -79,10 +77,7 @@ class TestOtelEnrichment:
         span.get_span_context.return_value = FakeCtx()
         fake_trace.get_current_span = lambda: span
 
-        fake_otel = ModuleType("opentelemetry")
-        fake_otel.trace = fake_trace
-        monkeypatch.setitem(sys.modules, "opentelemetry", fake_otel)
-        monkeypatch.setitem(sys.modules, "opentelemetry.trace", fake_trace)
+        monkeypatch.setattr(otel, "trace", fake_trace)
 
         meta = {"trace_id": "manual-override"}
         enrich_metadata(meta)
@@ -95,10 +90,7 @@ class TestOtelEnrichment:
             raise RuntimeError("boom")
 
         fake_trace.get_current_span = broken_get_current_span
-        fake_otel = ModuleType("opentelemetry")
-        fake_otel.trace = fake_trace
-        monkeypatch.setitem(sys.modules, "opentelemetry", fake_otel)
-        monkeypatch.setitem(sys.modules, "opentelemetry.trace", fake_trace)
+        monkeypatch.setattr(otel, "trace", fake_trace)
 
         # Must not raise — observability never crashes the app
         meta: dict = {}
@@ -108,13 +100,13 @@ class TestOtelEnrichment:
 
 class TestSentryBreadcrumb:
     def test_noop_without_sentry_sdk(self, monkeypatch):
-        monkeypatch.setitem(sys.modules, "sentry_sdk", None)
+        monkeypatch.setattr(sentry, "sentry_sdk", None)
         add_breadcrumb_for_context({"source": "cli"})  # must not raise
 
     def test_calls_add_breadcrumb_when_sdk_present(self, monkeypatch):
         fake_sdk = ModuleType("sentry_sdk")
         fake_sdk.add_breadcrumb = MagicMock()
-        monkeypatch.setitem(sys.modules, "sentry_sdk", fake_sdk)
+        monkeypatch.setattr(sentry, "sentry_sdk", fake_sdk)
 
         add_breadcrumb_for_context({"source": "http", "user_id": 42})
         fake_sdk.add_breadcrumb.assert_called_once()
@@ -126,7 +118,7 @@ class TestSentryBreadcrumb:
     def test_survives_sdk_errors(self, monkeypatch):
         fake_sdk = ModuleType("sentry_sdk")
         fake_sdk.add_breadcrumb = MagicMock(side_effect=RuntimeError("boom"))
-        monkeypatch.setitem(sys.modules, "sentry_sdk", fake_sdk)
+        monkeypatch.setattr(sentry, "sentry_sdk", fake_sdk)
         add_breadcrumb_for_context({"source": "cron"})  # must not raise
 
 
@@ -184,3 +176,29 @@ class TestPrometheusCollector:
 
         with pytest.raises(ValueError, match="Invalid audit_table"):
             AuditrumCollector(lambda: None, audit_table="bad; DROP")
+
+
+def test_audit_context_imports_observability_at_module_load():
+    """Every import the audit context needs happens when runtime is imported.
+
+    ``auditrum_context.__enter__`` used to import the observability helpers,
+    and they imported ``opentelemetry`` / ``sentry_sdk`` on each call. Request
+    threads entering the first audit context of a fresh worker at once raced
+    on those imports and hit ``_DeadlockError``. Loading the module must pull
+    them all in, so no thread imports anything on the request path.
+    """
+    soft_deps = [
+        m
+        for m in ("opentelemetry.trace", "sentry_sdk")
+        if importlib.util.find_spec(m.split(".")[0])
+    ]
+    wanted = ["auditrum.observability.otel", "auditrum.observability.sentry", *soft_deps]
+    code = (
+        "import sys\n"
+        "import auditrum.integrations.django.runtime\n"
+        f"print(','.join(m for m in {wanted!r} if m not in sys.modules))\n"
+    )
+    result = subprocess.run(
+        [sys.executable, "-c", code], capture_output=True, text=True, check=True
+    )
+    assert result.stdout.strip() == "", f"not loaded with runtime: {result.stdout.strip()}"
