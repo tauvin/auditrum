@@ -8,6 +8,8 @@ the API stabilises.
 
 ## [Unreleased]
 
+## [0.9.2] — 2026-11-13
+
 ### Fixed
 
 - **Import deadlock on the first audit contexts of a worker.**
@@ -1414,7 +1416,8 @@ Initial public release. Adds the Django integration, the Typer-based
 CLI, and the first cut of trigger-based audit logging on partitioned
 PostgreSQL tables.
 
-[Unreleased]: https://github.com/tauvin/auditrum/compare/v0.9.1...HEAD
+[Unreleased]: https://github.com/tauvin/auditrum/compare/v0.9.2...HEAD
+[0.9.2]: https://github.com/tauvin/auditrum/compare/v0.9.1...v0.9.2
 [0.9.1]: https://github.com/tauvin/auditrum/compare/v0.9.0...v0.9.1
 [0.9.0]: https://github.com/tauvin/auditrum/compare/v0.8.0...v0.9.0
 [0.8.0]: https://github.com/tauvin/auditrum/compare/v0.7.1...v0.8.0
